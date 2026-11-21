@@ -119,6 +119,8 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         with:
           global-json-file: global.json
+          # Safe here only: the step below restores under the same `if`, so the cache's save step finds the package
+          # folder. A job that may restore nothing keeps the cache off (tests/bash/test-ci-matrix.sh, #655).
           cache: true
           cache-dependency-path: '**/packages.lock.json'
       # Private patterns run in repo-rules only, so the secret reaches one job; this job warns that they're missing.
