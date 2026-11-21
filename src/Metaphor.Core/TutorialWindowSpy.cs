@@ -85,6 +85,30 @@ public sealed record ObjectFields(long Address, long? ClassRva, int Start, IRead
             fields);
     }
 
+    /// <summary>The fields of <paramref name="bytes"/>, 8-aligned from <paramref name="start"/>, that look like heap
+    /// pointers: 8-aligned user-space addresses outside the module. At most <paramref name="max"/>, in field order.
+    /// Only a lead for what to read next (#118); the reader still has to treat each as unverified.</summary>
+    public static IReadOnlyList<(int Offset, long Address)> HeapPointers(
+        ReadOnlySpan<byte> bytes, int start, long moduleBase, long moduleSize, int max)
+    {
+        var found = new List<(int, long)>();
+        for (var at = start + ((sizeof(long) - start % sizeof(long)) % sizeof(long));
+             at + sizeof(long) <= bytes.Length && found.Count < max; at += sizeof(long))
+        {
+            var value = BinaryPrimitives.ReadInt64LittleEndian(bytes[at..]);
+            var inModule = value >= moduleBase && value - moduleBase < moduleSize;
+            if (value is >= LowestHeap and < HighestUser && value % sizeof(long) == 0 && !inModule)
+            {
+                found.Add((at, value));
+            }
+        }
+        return found;
+    }
+
+    // The 64 KiB Windows never maps at the bottom, and the top of x64 user space.
+    private const long LowestHeap = 0x10000;
+    private const long HighestUser = 0x7fff_ffff_0000;
+
     /// <summary>The log's form: <c>at=0x… class=0x… +0x18=0x…,0x…,…</c>, the fields in order from the start.</summary>
     public override string ToString() => string.Create(CultureInfo.InvariantCulture,
         $"at=0x{Address:x} class={(ClassRva is { } rva ? $"0x{rva:x}" : "?")} +0x{Start:x}={string.Join(',', Fields.Select(f => $"0x{f:x}"))}");

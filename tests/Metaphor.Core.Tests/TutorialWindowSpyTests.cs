@@ -129,4 +129,22 @@ public sealed class TutorialWindowSpyTests
         Assert.Null(MsvcString.Read(bytes, NoHeap));
         Assert.Null(MsvcString.Read(bytes.AsSpan(0, MsvcString.Size - 1), Heap));
     }
+
+    [Fact]
+    public void HeapPointersAreTheAlignedUserAddressesOutsideTheModule()
+    {
+        var bytes = new byte[0x48];
+        long[] values = [0x7000_1234_5000, ModuleBase + 0x100, 0x20, 0x7000_0000_0004, -1, 0x2_0000_0000, 0x8000_0000_0000, 0, 0x3000_0000];
+        for (var i = 0; i < values.Length; i++)
+        {
+            BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(i * 8), values[i]);
+        }
+
+        Assert.Equal([(0, 0x7000_1234_5000L), (0x28, 0x2_0000_0000L), (0x40, 0x3000_0000L)],
+            ObjectFields.HeapPointers(bytes, 0, ModuleBase, ModuleSize, max: 8));
+        // A start between fields moves to the next aligned one; the limit stops the search.
+        Assert.Equal([(0x28, 0x2_0000_0000L)], ObjectFields.HeapPointers(bytes, 0x4, ModuleBase, ModuleSize, max: 1));
+        Assert.Equal([(0x28, 0x2_0000_0000L), (0x40, 0x3000_0000L)],
+            ObjectFields.HeapPointers(bytes, 0x9, ModuleBase, ModuleSize, max: 8));
+    }
 }

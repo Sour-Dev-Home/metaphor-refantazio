@@ -242,21 +242,21 @@
     "section": ".ecode",
     "pattern": "48 89 5C 24 18 44 88 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 E1 48 81 EC E0 00 00 00 41 0F B6 D8 4C 8B FA 48 8B F1 33 FF 48 8B 41 20 48 85 C0 0F 84",
     "gameBuilds": ["548ddc955c176867f062c44f94c03dd9ac33caefb278a5ac388e792aedf09504"],
-    "evidence": "Our reading of the exe in Ghidra 12.2: UUIC_Common_TutorialWindow's open, called only by its controller's update, reads the tutorial number through its second argument (docs/findings/tutorial-popup-window-static.md); one match on disk; not yet checked in memory"
+    "evidence": "Our reading of the exe in Ghidra 12.2: UUIC_Common_TutorialWindow's open, called only by its controller's update, reads the tutorial number through its second argument (docs/findings/tutorial-popup-window-static.md); one match on disk; hooked in the by-ear run of 2026-11-21, which logged the pop-up's number (docs/raw-sources/tutorial-popup-by-ear-2026-11-21.md)"
   },
   {
     "name": "TutorialWindowShowOther",
     "section": ".ecode",
     "pattern": "48 8B C4 48 89 58 10 48 89 70 18 55 57 41 56 48 8D 68 A1 48 81 EC D0 00 00 00 C5 F8 29 70 D8 41 0F B6 F8 48 8B F2 48 8B D9 48 8B 41 20 48 85 C0 0F 84",
     "gameBuilds": ["548ddc955c176867f062c44f94c03dd9ac33caefb278a5ac388e792aedf09504"],
-    "evidence": "Our reading of the exe in Ghidra 12.2: the controller's other open, on a second tutorial window, reads the tutorial number through its second argument (docs/findings/tutorial-popup-window-static.md); one match on disk; not yet checked in memory"
+    "evidence": "Our reading of the exe in Ghidra 12.2: the controller's other open, on a second tutorial window, reads the tutorial number through its second argument (docs/findings/tutorial-popup-window-static.md); one match on disk; hooked in the by-ear run of 2026-11-21, which logged the party-join pop-up's open (docs/raw-sources/tutorial-party-join-window-by-ear-2026-11-21.md)"
   },
   {
     "name": "TutorialWindowUpdate",
     "section": ".ecode",
     "pattern": "41 56 48 83 EC 30 83 79 18 03 4C 8B F1 0F 84 ?? ?? ?? ?? 48 8B 01 FF 50 08 84 C0 0F 84 ?? ?? ?? ?? 41 8B 4E 18 48 89 5C 24 50",
     "gameBuilds": ["548ddc955c176867f062c44f94c03dd9ac33caefb278a5ac388e792aedf09504"],
-    "evidence": "Our reading of the exe in Ghidra 12.2: UUIC_Common_TutorialWindow's vtable slot 13 (vtable 0x22576a0), its per-frame update (docs/findings/tutorial-popup-window-static.md); one match on disk; not yet checked in memory"
+    "evidence": "Our reading of the exe in Ghidra 12.2: UUIC_Common_TutorialWindow's vtable slot 13 (vtable 0x22576a0), its per-frame update (docs/findings/tutorial-popup-window-static.md), which returns at once when +0x18 is 3 (the pattern's cmp and je); one match on disk; hooked in the by-ear run of 2026-11-21, one record per page turn (docs/raw-sources/tutorial-popup-by-ear-2026-11-21.md)"
   },
   {
     "name": "FieldNavmeshSnap",

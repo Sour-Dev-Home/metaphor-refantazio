@@ -25,7 +25,9 @@ public sealed record DialogueBindings(int RepeatButtons, int ReaderButtons, int 
 /// nothing and the game keeps them (#206, #232). A press is an up-to-down edge of a binding held on any pad or the
 /// keyboard, so a second pad mirroring the first (Steam Input's virtual pad) or one whose sticks drift can't fire it
 /// again, and a binding already held when the window opens doesn't fire. The input frame (#301) hands it each pad and
-/// keyboard read and each read of the window, from any of the game's threads.</summary>
+/// keyboard read and each read of the window, from any of the game's threads. While a pop-up is on screen (a tutorial's
+/// page, #118) the repeat binding re-speaks the pop-up instead, and acts and is hidden even with the dialogue window
+/// closed; the reader binding still acts only in dialogue.</summary>
 public sealed class DialogueControls : IWindowInputControls
 {
     private const int KeyboardSource = -1;
@@ -36,15 +38,30 @@ public sealed class DialogueControls : IWindowInputControls
     private readonly DialogueReader reader;
     private readonly IAnnouncer announcer;
     private readonly Action? onClose;
+    private readonly Func<string?>? onScreen;
     private readonly Binding repeat = new();
     private readonly Binding toggle = new();
     private bool open;
     // The history's count when the window last closed: repeat speaks only lines recorded after it (#526).
     private long closedAt;
 
-    public DialogueControls(DialogueBindings bindings, DialogueHistory history, DialogueReader reader, IAnnouncer announcer, Action? onClose = null)
+    /// <param name="bindings">The buttons and keys.</param>
+    /// <param name="history">The lines spoken, for repeat.</param>
+    /// <param name="reader">The switch the reader binding toggles.</param>
+    /// <param name="announcer">Where repeat speaks.</param>
+    /// <param name="onClose">Told when the dialogue window closes.</param>
+    /// <param name="onScreen">What the pop-up on screen last said, or null while none is up; asked on each read, so it
+    /// must be cheap.</param>
+    public DialogueControls(
+        DialogueBindings bindings,
+        DialogueHistory history,
+        DialogueReader reader,
+        IAnnouncer announcer,
+        Action? onClose = null,
+        Func<string?>? onScreen = null)
     {
         this.onClose = onClose;
+        this.onScreen = onScreen;
         ArgumentNullException.ThrowIfNull(bindings);
         ArgumentNullException.ThrowIfNull(history);
         ArgumentNullException.ThrowIfNull(reader);
@@ -89,8 +106,8 @@ public sealed class DialogueControls : IWindowInputControls
         }
         var repeatHeld = Holds(buttons, bindings.RepeatButtons);
         var toggleHeld = Holds(buttons, bindings.ReaderButtons);
-        var hidden = Read(pad, repeatHeld, toggleHeld);
-        return hidden ? buttons & ~(bindings.RepeatButtons | bindings.ReaderButtons) : buttons;
+        var (repeatHidden, toggleHidden) = Read(pad, repeatHeld, toggleHeld);
+        return buttons & ~((repeatHidden ? bindings.RepeatButtons : 0) | (toggleHidden ? bindings.ReaderButtons : 0));
     }
 
     /// <summary>Takes one read of the keys held down, acts on a press, and returns the keys to hand the game: without the
@@ -98,37 +115,45 @@ public sealed class DialogueControls : IWindowInputControls
     public IReadOnlyList<int> Keys(IReadOnlyList<int> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        var hidden = Read(KeyboardSource, keys.Contains(bindings.RepeatKey), keys.Contains(bindings.ReaderKey));
-        return hidden ? [.. keys.Where(key => key != bindings.RepeatKey && key != bindings.ReaderKey)] : keys;
+        var (repeatHidden, toggleHidden) =
+            Read(KeyboardSource, keys.Contains(bindings.RepeatKey), keys.Contains(bindings.ReaderKey));
+        return repeatHidden || toggleHidden
+            ? [.. keys.Where(key => !(repeatHidden && key == bindings.RepeatKey) && !(toggleHidden && key == bindings.ReaderKey))]
+            : keys;
     }
 
     private static bool Holds(int buttons, int binding) => binding != 0 && (buttons & binding) == binding;
 
-    /// <summary>Records what <paramref name="source"/> holds, acts on each press, and says whether the bound input is
+    /// <summary>Records what <paramref name="source"/> holds, acts on each press, and says whether each binding is
     /// hidden from the game.</summary>
-    private bool Read(int source, bool repeatHeld, bool toggleHeld)
+    private (bool Repeat, bool Toggle) Read(int source, bool repeatHeld, bool toggleHeld)
     {
+        // Asked outside the lock: it takes the pop-ups' own.
+        var popUp = onScreen?.Invoke();
         bool repeatPressed;
         bool togglePressed;
-        bool hidden;
+        bool repeating;
+        bool inDialogue;
         long since;
         lock (gate)
         {
-            hidden = open;
+            inDialogue = open;
+            repeating = open || popUp is not null;
             since = closedAt;
-            repeatPressed = repeat.Update(source, repeatHeld) && open;
+            repeatPressed = repeat.Update(source, repeatHeld) && repeating;
             togglePressed = toggle.Update(source, toggleHeld) && open;
         }
         // Spoken outside the lock: the announcer may take its time.
         if (repeatPressed)
         {
-            announcer.Announce(new Announcement(history.LatestSince(since) ?? "No dialogue to repeat", Interrupt: true));
+            announcer.Announce(new Announcement(
+                popUp ?? history.LatestSince(since) ?? "No dialogue to repeat", Interrupt: true));
         }
         if (togglePressed)
         {
             reader.Toggle();
         }
-        return hidden;
+        return (repeating, inDialogue);
     }
 
     /// <summary>One binding's state across sources: which hold it now.</summary>

@@ -9,6 +9,8 @@ checks them in the first game session and removes the tag.
 
 ## Unreleased
 
+- **Tutorial pop-ups say what they are.** When a tutorial opens, the mod reads its title, how many pages it has, and
+  its first page. Each page you turn to is read as "Page 2 of 3" and its text (#118). `[NEEDS VERIFICATION by ear]`
 - **What is near, and where am I.** In the field, `N` says the people, doors, chests and enemies near you, nearest
   first, with rough steps and a direction from your facing; `LB` with the D-pad's Down and Up steps through them. `L`,
   or `LB` with Left, says the place name the game last showed (#181). `[NEEDS VERIFICATION by ear]`

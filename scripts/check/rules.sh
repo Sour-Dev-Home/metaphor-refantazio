@@ -6,7 +6,7 @@
 # Run globals: list_entries reads `stage` and `tmp`, and sets `scan_scope`, which main resets; scan_files reads `stage`,
 # `tmp`, `root` and `scan_scope`; report updates `failures`. Reads GITHUB_ACTIONS, METAPHOR_SCAN_ALL, PII_PATTERNS,
 # REQUIRE_PRIVATE_PATTERNS and the git-ignored .claude/pii-patterns.txt.
-# Private to this module: max_bytes, known_hashes, user_path_re, email_re, not_email_re, and the scan's folder and
+# Private to this module: max_bytes, known_hashes, user_path_re, email_re, not_email_re, licence_notice_re, and the scan's folder and
 # arrays: blobs, paths, ids, sizes, notes, found_hash, found_user, found_email, found_name, found_private, has_source,
 # has_saved, has_build and has_sha.
 
@@ -110,6 +110,9 @@ email_re='[a-z0-9._%+-]+@[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}'
 # (git@host) and high-resolution image names (icon@2x.png).
 not_email_re='@([a-z0-9-]+\.)*(example\.(com|org|net)|[a-z0-9-]+\.(invalid|example|test)|users\.noreply\.github\.com)$'
 not_email_re+='|^git@|@[0-9]+x\.[a-z]+$'
+# A third-party licence notice, such as src/Metaphor.Core/licenses/fastlz/LICENSE.MIT: the email rule skips it.
+# Only src/<project>/licenses/<library>/, and only LICENSE, COPYING or NOTICE with at most one extension.
+licence_notice_re='^src/[^/]+/licenses/[^/]+/(LICENSE|COPYING|NOTICE)(\.[A-Za-z0-9]+)?$'
 
 # The scan (issue #297). Process starts dominate the run time in Git Bash, so nothing starts once per file: one
 # `git cat-file --batch` writes every blob to $blobs/<n> (n is its index in `paths`), one sha256sum pass hashes them,
@@ -291,7 +294,9 @@ scan_files() {
     esac
 
     emit "${found_user[i]:-}"
-    emit "${found_email[i]:-}"
+    # A third-party licence notice ships verbatim, its author's email included (ADR 0005), so only the generic email
+    # rule skips it. The user-path and private-pattern rules still apply, so the maintainer's own details are caught.
+    [[ "$path" =~ $licence_notice_re ]] || emit "${found_email[i]:-}"
     [ -z "${found_name[i]:-}" ] || report "personal information: $path: file name matches a private pattern"
     emit "${found_private[i]:-}"
   done

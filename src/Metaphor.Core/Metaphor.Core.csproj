@@ -8,6 +8,9 @@
   <ItemGroup>
     <EmbeddedResource Include="known-game-builds.json" LogicalName="Metaphor.Core.known-game-builds.json" />
     <EmbeddedResource Include="hook-signatures.json" LogicalName="Metaphor.Core.hook-signatures.json" />
+    <!-- FastLZ's MIT licence, for the decompressor ported in Navigation/FastLz.cs (#179); it ships with the mod. -->
+    <None Include="licenses/fastlz/LICENSE.MIT" CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -311,4 +311,56 @@ public sealed class DialogueControlsTests
         Assert.Equal(0, controls.Pad(0, X));
         Assert.Equal([Said("Ada: One.")], announcer.Said);
     }
+
+    // The by-ear finding of 2026-11-21: on a tutorial pop-up's page 2, X and R should say that page again.
+    [Fact]
+    public void WhileAPopUpIsOnScreenXRepeatsItsPageAndIsHidden()
+    {
+        var withPopUp = new DialogueControls(
+            DialogueBindings.Default, history, reader, announcer, onScreen: () => "Page 2 of 3. Second.");
+        history.Add("Ada: One.");
+
+        Assert.Equal(A, withPopUp.Pad(0, X | A));
+
+        Assert.Equal([Said("Page 2 of 3. Second.")], announcer.Said);
+    }
+
+    [Fact]
+    public void WhileAPopUpIsOverDialogueRRepeatsThePopUp()
+    {
+        var withPopUp = new DialogueControls(
+            DialogueBindings.Default, history, reader, announcer, onScreen: () => "Walking About, 3 pages. Press to walk.");
+        history.Add("Ada: One.");
+        withPopUp.WindowRead(Message);
+
+        Assert.Equal([Enter], withPopUp.Keys([Enter, R]));
+
+        Assert.Equal([Said("Walking About, 3 pages. Press to walk.")], announcer.Said);
+    }
+
+    [Fact]
+    public void OnceThePopUpHasGoneXRepeatsTheLastLineAgain()
+    {
+        var onScreen = "Page 2 of 3. Second.";
+        var withPopUp = new DialogueControls(DialogueBindings.Default, history, reader, announcer, onScreen: () => onScreen);
+        history.Add("Ada: One.");
+        withPopUp.WindowRead(Message);
+        withPopUp.Pad(0, X);
+        withPopUp.Pad(0, 0);
+
+        onScreen = null;
+        withPopUp.Pad(0, X);
+
+        Assert.Equal([Said("Page 2 of 3. Second."), Said("Ada: One.")], announcer.Said);
+    }
+
+    [Fact]
+    public void APopUpOutsideDialogueLeavesTheReaderBindingToTheGame()
+    {
+        var withPopUp = new DialogueControls(DialogueBindings.Default, history, reader, announcer, onScreen: () => "Page 1 of 1.");
+
+        Assert.Equal(LeftBumper | RightBumper, withPopUp.Pad(0, LeftBumper | RightBumper));
+        Assert.Equal([T], withPopUp.Keys([T]));
+        Assert.Empty(announcer.Said);
+    }
 }

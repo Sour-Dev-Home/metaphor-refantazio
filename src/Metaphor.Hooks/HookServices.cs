@@ -110,6 +110,14 @@ internal sealed record HookServices
     /// file hook is feeding it.</summary>
     public MessageSerials Serials { get; init; } = new([]);
 
+    /// <summary>The game's tutorial table (#118), which the entry point loads from the game's archive once the hooks
+    /// are in.</summary>
+    public TutorialTableSource Tutorials { get; init; } = new();
+
+    /// <summary>Speaks tutorial pop-ups as they open (#118); silent unless built by <see cref="Speaking"/>.</summary>
+    public TutorialPopups TutorialPopups { get; init; } =
+        new(new MessageLibrary(), new SilentAnnouncer(), new TextCleaner(TextCleanerRules.None), () => null);
+
     /// <summary>Where features play the mod's sound cues (#636, ADR 0019); silent unless the entry point starts one.
     /// </summary>
     public ICuePlayer Cues { get; init; } = new SilentCuePlayer();
@@ -156,7 +164,12 @@ internal sealed record HookServices
         var voiceLanguage = new VoiceLanguageRead();
         var dialogue = new DialogueAnnouncer(
             reader, cleaner, history, () => settings.Current.VoicedLines, voiceLanguage.Read);
-        var controls = new DialogueControls(DialogueBindings.Default, history, reader, announcer, dialogue.EndConversation);
+        // Tutorial pop-ups speak through the reader too, once their table has loaded (#118).
+        var tutorials = new TutorialTableSource();
+        var tutorialPopups = new TutorialPopups(library, reader, cleaner, () => tutorials.Table);
+        // While a pop-up is up, the repeat binding says its page again (by-ear finding of 2026-11-21).
+        var controls = new DialogueControls(
+            DialogueBindings.Default, history, reader, announcer, dialogue.EndConversation, () => tutorialPopups.OnScreen);
         // Menus speak through the reader too (#214), and their controls toggle it with the dialogue's binding.
         var screens = new MenuScreens(KnownScreens.All);
         screens.Observe(new TitleMenuFocus(library, reader, cleaner));
@@ -248,6 +261,8 @@ internal sealed record HookServices
             CharacterTable = characterTable,
             FollowerTable = followerTable,
             Voice = voiceLanguage,
+            Tutorials = tutorials,
+            TutorialPopups = tutorialPopups,
             MenusOpen = menusOpen,
             DialogueWindow = window,
             FieldWorld = fieldWorld,
