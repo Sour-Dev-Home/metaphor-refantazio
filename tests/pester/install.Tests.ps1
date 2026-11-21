@@ -256,7 +256,7 @@ Describe 'install.ps1' {
         $enterIsNo = [regex]::Escape('Type yes and press Enter to go on, or press Enter alone to stop.')
         $enterIsYes = [regex]::Escape('Press Enter alone to go on, or type no and press Enter to stop.')
         $result.Output | Should -Match "Install the mod\?.* $enterIsNo"
-        $result.Output | Should -Match "Use it\? $enterIsYes"
+        $result.Output | Should -Match "Use the game found in Steam\? $enterIsYes"
         # One sentence per answer given: the install, the game (Enter means yes), then four downloads.
         ([regex]::Matches($result.Output, $enterIsNo)).Count | Should -Be 5
         ([regex]::Matches($result.Output, $enterIsYes)).Count | Should -Be 1
@@ -876,10 +876,15 @@ Describe 'Confirm-RunWindow' {
         $script:say = { param($Printed, $Spoken) $said.Add($Printed) }
         Mock -ModuleName MetaphorInstall Test-Elevated { $true }
 
-        # Runs Confirm-RunWindow with ANSWER as the reply to its question; $null is no console to answer on.
+        # Runs Confirm-RunWindow with ANSWER as the typed reply to its question; $null is no answer to give. ASKED gets the
+        # questions it printed.
         function Invoke-Confirm($Answer) {
-            $script:answer = $Answer
-            Confirm-RunWindow -Say $say -Ask { param($Question) $asked.Add($Question); $script:answer }
+            $asker = New-InstallAsker -Scripted -Answers @(if ($null -ne $Answer) { $Answer })
+            $all = @(Confirm-RunWindow -Say $say -Asker $asker 6>&1)
+            foreach ($line in $all | Where-Object { $_ -is [Management.Automation.InformationRecord] }) {
+                if ("$line" -match 'anyway\?') { $asked.Add("$line".TrimEnd()) }
+            }
+            $all | Where-Object { $_ -is [bool] }
         }
     }
     BeforeEach { $said.Clear(); $asked.Clear() }
@@ -922,6 +927,187 @@ Describe 'Confirm-RunWindow' {
         Mock -ModuleName MetaphorInstall Test-UacEnabled { $false }
         Invoke-Confirm $null | Should -BeFalse
         $asked.Count | Should -Be 1
+    }
+}
+
+Describe 'Confirm-Question' {
+    BeforeAll {
+        $script:boxes = [Collections.Generic.List[object]]::new()
+        $script:spoken = [Collections.Generic.List[string]]::new()
+        $script:voice = [pscustomobject]@{}
+        $voice | Add-Member ScriptMethod Speak { param($Text) $spoken.Add($Text) }
+        # An asker whose message box records what it shows and presses BUTTON (6 Yes, 7 No, 0 did not open).
+        function New-BoxAsker([int] $Button, [switch] $ScreenReader, [string[]] $Answers) {
+            $script:button = $Button
+            $box = { param($Text, $Caption, $Flags) $boxes.Add([pscustomobject]@{ Text = $Text; Caption = $Caption; Flags = $Flags }); $script:button }
+            $typed = @{}
+            if ($PSBoundParameters.ContainsKey('Answers')) { $typed = @{ Scripted = $true; Answers = $Answers } }
+            $asker = New-InstallAsker -Dialogs -Voice $voice -ScreenReader:$ScreenReader -MessageBox $box @typed
+            if ($typed.Count) { $asker.Dialogs = $true }
+            $asker
+        }
+    }
+    BeforeEach { $boxes.Clear(); $spoken.Clear() }
+
+    It 'asks in a Yes and No message box with the question alone, No the default, and takes Yes as yes' {
+        Confirm-Question (New-BoxAsker 6) 'Download it?' 6> $null | Should -BeTrue
+        $boxes.Count | Should -Be 1
+        $boxes[0].Text | Should -BeExactly 'Download it?'
+        $boxes[0].Caption | Should -BeExactly 'Metaphor ReFantazio accessibility mod'
+        # MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2, MB_SETFOREGROUND.
+        $boxes[0].Flags | Should -Be (0x4 -bor 0x20 -bor 0x100 -bor 0x10000)
+    }
+
+    It 'makes Yes the default where Enter meant yes, and takes No as no' {
+        Confirm-Question (New-BoxAsker 7) 'Use it?' -EnterMeansYes 6> $null | Should -BeFalse
+        $boxes[0].Flags | Should -Be (0x4 -bor 0x20 -bor 0x10000)
+    }
+
+    It 'leaves the question to the screen reader while the box is open, and prints it with the answer after' {
+        $printed = @(Confirm-Question (New-BoxAsker 6 -ScreenReader) 'Download it?' 6>&1 | Where-Object { $_ -isnot [bool] })
+        $spoken.Count | Should -Be 0
+        ($printed | ForEach-Object { "$_" }) | Should -Be @('Download it? Yes')
+    }
+
+    It 'speaks the question with Windows'' voice when no screen reader will read the box' {
+        Confirm-Question (New-BoxAsker 7) 'Download it?' 6> $null | Should -BeFalse
+        @($spoken) | Should -Be @('Download it?')
+    }
+
+    It 'asks in the console instead when the box does not open' {
+        Confirm-Question (New-BoxAsker 0 -Answers 'yes') 'Download it?' 6> $null | Should -BeTrue
+        $boxes.Count | Should -Be 1
+        $spoken[-1] | Should -BeExactly (Format-YesNoQuestion 'Download it?')
+    }
+
+    It 'never opens a box in a scripted run' {
+        $asker = New-InstallAsker -Scripted -Answers 'y' -Dialogs -MessageBox { throw 'a box opened' }
+        $asker.Dialogs | Should -BeFalse
+        Confirm-Question $asker 'Download it?' 6> $null | Should -BeTrue
+    }
+
+    It 'opens no window under -NonInteractive' {
+        $module = Join-Path $repo 'scripts/player/MetaphorInstall.psm1'
+        $output = & $pwsh -NoProfile -NonInteractive -Command "Import-Module '$module'; 'window=' + (Test-QuestionWindow)" 2>&1
+        ($output -join "`n") | Should -Match 'window=False'
+    }
+
+    It 'is how install.ps1 asks: through the asker, its windows only off a scripted run' {
+        $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'scripts/player/install.ps1'), [ref]$null, [ref]$null)
+        $commands = @($ast.FindAll({ param($n) $n -is [Management.Automation.Language.CommandAst] }, $true))
+        $names = @($commands | ForEach-Object { $_.GetCommandName() })
+        $names | Should -Not -Contain 'Read-Host'
+        $names | Should -Not -Contain 'Read-Answer'
+        $asker = @($commands | Where-Object { $_.GetCommandName() -eq 'New-InstallAsker' })
+        $asker.Count | Should -Be 1
+        $asker[0].Extent.Text | Should -Match '-Dialogs:\(-not \$scripted -and \(Test-QuestionWindow\)\)'
+    }
+}
+
+Describe 'Show-OpenFileBox' {
+    BeforeAll {
+        # Shows the Open dialog with CONSOLE as the console window's handle; the stand-in dialog records its owner
+        # and, with CHOSEN, picks that file.
+        function Invoke-OpenBox([long] $Console, [string] $Chosen) {
+            InModuleScope MetaphorInstall -Parameters @{ Console = $Console; Chosen = $Chosen } {
+                param($Console, $Chosen)
+                $seen = @{}
+                $show = {
+                    param($Dialog, $Owner)
+                    $seen.Owner = $Owner; $seen.Title = $Dialog.Title; $seen.Filter = $Dialog.Filter
+                    if ($Chosen) { $Dialog.FileName = $Chosen; [Windows.Forms.DialogResult]::OK } else { [Windows.Forms.DialogResult]::Cancel }
+                }.GetNewClosure()
+                $file = Show-OpenFileBox 'Choose it.' 'METAPHOR.exe' -ConsoleWindow { [IntPtr] $Console }.GetNewClosure() -ShowDialog $show
+                [pscustomobject]@{ File = $file; Owner = $seen.Owner; Title = $seen.Title; Filter = $seen.Filter }
+            }
+        }
+    }
+
+    It 'names the console window as the owner without taking it over, and shows only METAPHOR.exe' {
+        $chosen = Join-Path $TestDrive 'METAPHOR.exe'
+        $result = Invoke-OpenBox 4660 $chosen
+        $result.File | Should -Be $chosen
+        $result.Owner | Should -BeOfType ([Windows.Forms.IWin32Window])
+        $result.Owner | Should -Not -BeOfType ([Windows.Forms.NativeWindow])
+        $result.Owner.Handle | Should -Be ([IntPtr] 4660)
+        $result.Title | Should -Be 'Choose it.'
+        $result.Filter | Should -Be 'METAPHOR.exe|METAPHOR.exe'
+    }
+
+    It 'shows the dialog without an owner when there is no console window, and gives nothing when cancelled' {
+        $result = Invoke-OpenBox 0
+        $result.Owner | Should -BeNullOrEmpty
+        $result.File | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Select-InstallGame in question windows' {
+    BeforeAll {
+        $script:gameFolder = (New-Item -ItemType Directory (Join-Path $TestDrive 'games')).FullName
+        $script:games = foreach ($n in 1, 2) {
+            $exe = Join-Path (New-Item -ItemType Directory -Force (Join-Path $gameFolder "lib$n")).FullName 'METAPHOR.exe'
+            Set-Content -LiteralPath $exe -Value ''
+            $exe
+        }
+        $script:boxTexts = [Collections.Generic.List[string]]::new()
+        $script:picked = [Collections.Generic.List[string]]::new()
+        # Runs Select-InstallGame with FOUND as Steam's games, BUTTONS pressed in turn and PICK as the Open dialog's
+        # result (a script block, so it can throw).
+        function Invoke-Select([string[]] $Found, [int[]] $Buttons = @(), [scriptblock] $Pick = { $null }, [string[]] $Answers) {
+            $script:found = $Found
+            $script:presses = [Collections.Generic.Queue[int]]::new([int[]] $Buttons)
+            $box = { param($Text, $Caption, $Flags) $boxTexts.Add($Text); $presses.Dequeue() }
+            $script:pick = $Pick
+            $file = { param($Title, $FileName) $picked.Add("$Title|$FileName"); & $script:pick }
+            $typed = @{}
+            if ($PSBoundParameters.ContainsKey('Answers')) { $typed = @{ Scripted = $true; Answers = $Answers } }
+            $asker = New-InstallAsker -Dialogs -MessageBox $box -PickFile $file @typed
+            $asker.Dialogs = $true
+            $context = [pscustomobject]@{ ConfigPath = (Join-Path $TestDrive 'none.json'); SteamRoot = ''; Asker = $asker
+                Say = { param($Printed, $Spoken) }; GameExe = $null }
+            Mock -ModuleName MetaphorInstall Find-MetaphorGame { $script:found }
+            $step = InModuleScope MetaphorInstall -Parameters @{ Context = $context } { param($Context) Select-InstallGame $Context } 6> $null
+            [pscustomobject]@{ Step = $step; Game = $context.GameExe }
+        }
+    }
+    BeforeEach { $boxTexts.Clear(); $picked.Clear() }
+
+    It 'asks Yes or No for the one game found, Yes the default' {
+        $result = Invoke-Select @($games[0]) @(6)
+        $result.Game | Should -Be $games[0]
+        @($boxTexts) | Should -Be @('Use the game found in Steam?')
+    }
+
+    It 'asks about each place in turn until a yes, naming the place' {
+        $result = Invoke-Select $games @(7, 6)
+        $result.Game | Should -Be $games[1]
+        @($boxTexts) | Should -Be @("Use the game in place 1 of 2? $($games[0])", "Use the game in place 2 of 2? $($games[1])")
+    }
+
+    It 'chooses no game after a no to every place' {
+        $result = Invoke-Select $games @(7, 7)
+        $result.Step.State | Should -Be 'failed'
+        $result.Game | Should -BeNullOrEmpty
+    }
+
+    It 'opens the Open dialog for METAPHOR.exe when Steam has none, and takes the file chosen' {
+        $chosen = $games[1]
+        $result = Invoke-Select @() -Pick { $chosen }.GetNewClosure()
+        $result.Game | Should -Be $chosen
+        @($picked) | Should -Be @('Did not find the game in Steam. Choose METAPHOR.exe in the game''s install folder.|METAPHOR.exe')
+        $boxTexts.Count | Should -Be 0
+    }
+
+    It 'chooses no game when the Open dialog is cancelled, and says to choose METAPHOR.exe' {
+        $result = Invoke-Select @()
+        $result.Step.State | Should -Be 'failed'
+        $result.Step.Fix | Should -Match 'choose METAPHOR\.exe'
+        $result.Step.Fix | Should -Not -Match '\btype\b'
+    }
+
+    It 'asks for the path in the console when the Open dialog cannot open' {
+        $result = Invoke-Select @() -Pick { throw 'no STA' } -Answers @("`"$($games[0])`"")
+        $result.Game | Should -Be $games[0]
     }
 }
 

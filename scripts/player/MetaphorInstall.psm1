@@ -131,6 +131,188 @@ function Test-YesOrEnter($Answer) { [bool]($null -ne $Answer -and $Answer -match
 # True when the answer to QUESTION is y or yes; no without a console.
 function Confirm-Step([string] $Question) { Test-Yes (Read-Answer (Format-YesNoQuestion $Question)) }
 
+# --- The installer's questions ---------------------------------------------------------------------------------------
+# install.ps1 asks each yes/no question in a Windows message box with Yes and No buttons (#607): the screen reader reads
+# its text and buttons itself, so the question isn't also spoken through it, and no one types an answer. The box is
+# owned by the console window and asks to come to the front, so the focus lands on it. Its default button is the answer
+# Enter gave when the question was typed. A box with Yes and No and no Cancel button ignores Escape, by Windows'
+# MessageBox reference [NEEDS VERIFICATION] by ear (#573); N answers No. The game's file, when Steam has none, is
+# chosen in Windows' Open dialog. A scripted run (-Answers), or one without a console window or a desktop session, asks
+# in the console as before; so does a question whose window doesn't open.
+
+# The title of every question's window.
+$QuestionCaption = 'Metaphor ReFantazio accessibility mod'
+# MessageBoxW's flags and results: MB_YESNO, MB_ICONQUESTION, MB_DEFBUTTON2, MB_SETFOREGROUND; IDYES, IDNO.
+$MessageBoxFlag = @{ YesNo = 0x4; Question = 0x20; SecondDefault = 0x100; SetForeground = 0x10000 }
+$MessageBoxResult = @{ Yes = 6; No = 7 }
+
+# A type with user32's MessageBoxW and kernel32's GetConsoleWindow, built in memory as Get-FindWindow is (#459).
+$DialogType = $null
+function Get-DialogNative {
+    if (-not $script:DialogType) {
+        $access = [Reflection.Emit.AssemblyBuilderAccess]::Run
+        $assembly = [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly((New-Object Reflection.AssemblyName 'MetaphorInstallDialog'), $access)
+        $type = $assembly.DefineDynamicModule('MetaphorInstallDialog').DefineType('MetaphorInstallDialog.Native',
+            [Reflection.TypeAttributes] 'Public, Abstract, Sealed')
+        $calls = @(
+            @('user32.dll', 'MessageBoxW', [Int32], @([IntPtr], [string], [string], [UInt32])),
+            @('kernel32.dll', 'GetConsoleWindow', [IntPtr], @()))
+        foreach ($call in $calls) {
+            $method = $type.DefinePInvokeMethod($call[1], $call[0], $call[1], [Reflection.MethodAttributes] 'Public, Static, PinvokeImpl',
+                [Reflection.CallingConventions]::Standard, $call[2], [Type[]] $call[3],
+                [Runtime.InteropServices.CallingConvention]::Winapi, [Runtime.InteropServices.CharSet]::Unicode)
+            $method.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+        }
+        $script:DialogType = $type.CreateType()
+    }
+    $script:DialogType
+}
+
+# True when the questions can open windows: someone can answer (Test-Interactive) and there is a console window to own
+# them.
+function Test-QuestionWindow {
+    if (-not (Test-Interactive)) { return $false }
+    try { (Get-DialogNative)::GetConsoleWindow() -ne [IntPtr]::Zero } catch { $false }
+}
+
+# The button pressed in a message box owned by the console window: $MessageBoxResult's, or 0 when it didn't open.
+function Show-MessageBox([string] $Text, [string] $Caption, [UInt32] $Flags) {
+    $native = Get-DialogNative
+    $native::MessageBoxW($native::GetConsoleWindow(), $Text, $Caption, $Flags)
+}
+
+# A type that implements WinForms' IWin32Window with a handle given to its constructor and nothing else, built in memory
+# as Get-FindWindow is (#459). It only reports the console window as a dialog's owner: NativeWindow.AssignHandle would
+# subclass that window, which belongs to the console host's process, not this one.
+$OwnerType = $null
+function Get-OwnerType {
+    if (-not $script:OwnerType) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $access = [Reflection.Emit.AssemblyBuilderAccess]::Run
+        $assembly = [Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly((New-Object Reflection.AssemblyName 'MetaphorInstallOwner'), $access)
+        $type = $assembly.DefineDynamicModule('MetaphorInstallOwner').DefineType('MetaphorInstallOwner.Owner',
+            [Reflection.TypeAttributes] 'Public, Sealed, Class', [object], [Type[]] @([Windows.Forms.IWin32Window]))
+        $field = $type.DefineField('handle', [IntPtr], [Reflection.FieldAttributes]::Private)
+        $constructor = $type.DefineConstructor([Reflection.MethodAttributes] 'Public, HideBySig', [Reflection.CallingConventions]::Standard,
+            [Type[]] @([IntPtr]))
+        $il = $constructor.GetILGenerator()
+        $il.Emit([Reflection.Emit.OpCodes]::Ldarg_0)
+        $il.Emit([Reflection.Emit.OpCodes]::Call, [object].GetConstructor([Type]::EmptyTypes))
+        $il.Emit([Reflection.Emit.OpCodes]::Ldarg_0)
+        $il.Emit([Reflection.Emit.OpCodes]::Ldarg_1)
+        $il.Emit([Reflection.Emit.OpCodes]::Stfld, $field)
+        $il.Emit([Reflection.Emit.OpCodes]::Ret)
+        $getter = $type.DefineMethod('get_Handle', [Reflection.MethodAttributes] 'Public, Virtual, Final, NewSlot, HideBySig, SpecialName',
+            [IntPtr], [Type]::EmptyTypes)
+        $il = $getter.GetILGenerator()
+        $il.Emit([Reflection.Emit.OpCodes]::Ldarg_0)
+        $il.Emit([Reflection.Emit.OpCodes]::Ldfld, $field)
+        $il.Emit([Reflection.Emit.OpCodes]::Ret)
+        $type.DefineMethodOverride($getter, [Windows.Forms.IWin32Window].GetMethod('get_Handle'))
+        $property = $type.DefineProperty('Handle', [Reflection.PropertyAttributes]::None, [IntPtr], [Type]::EmptyTypes)
+        $property.SetGetMethod($getter)
+        $script:OwnerType = $type.CreateType()
+    }
+    $script:OwnerType
+}
+
+# An IWin32Window that names HANDLE as a dialog's owner, or $null for no window (0).
+function New-DialogOwner([IntPtr] $Handle) {
+    if ($Handle -eq [IntPtr]::Zero) { return $null }
+    (Get-OwnerType)::new($Handle)
+}
+
+# The file chosen in Windows' Open dialog, titled TITLE and showing only files named FILENAME, owned by the console
+# window (CONSOLEWINDOW gives its handle) [NEEDS VERIFICATION] by ear (#573); $null when cancelled. SHOWDIALOG shows
+# the dialog with its owner, or none, and stands in for it in tests. It throws where the dialog can't open: it needs a
+# single-threaded apartment, which Windows PowerShell 5.1's console has.
+function Show-OpenFileBox([string] $Title, [string] $FileName,
+    [scriptblock] $ConsoleWindow = { (Get-DialogNative)::GetConsoleWindow() },
+    [scriptblock] $ShowDialog = {
+        param($Dialog, $Owner)
+        if ([Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') { throw 'the Open dialog needs an STA thread' }
+        if ($Owner) { $Dialog.ShowDialog($Owner) } else { $Dialog.ShowDialog() }
+    }) {
+    Add-Type -AssemblyName System.Windows.Forms
+    $dialog = New-Object Windows.Forms.OpenFileDialog
+    try {
+        $dialog.Title = $Title
+        $dialog.Filter = "$FileName|$FileName"
+        $dialog.CheckFileExists = $true
+        $owner = New-DialogOwner (& $ConsoleWindow)
+        if ((& $ShowDialog $dialog $owner) -eq [Windows.Forms.DialogResult]::OK) { return $dialog.FileName }
+        return $null
+    }
+    finally { $dialog.Dispose() }
+}
+
+# How install.ps1 asks its questions: in windows (DIALOGS), else typed in the console, or from ANSWERS in order with
+# SCRIPTED. VOICE (Start-Voice's, or $null) speaks each typed question; a question in a window is spoken only when
+# SCREENREADER is off, since a running reader reads the window itself. MESSAGEBOX and PICKFILE stand in for
+# Show-MessageBox and Show-OpenFileBox in tests.
+function New-InstallAsker([string[]] $Answers, [switch] $Scripted, $Voice, [switch] $ScreenReader, [switch] $Dialogs,
+    [scriptblock] $MessageBox = { param($Text, $Caption, $Flags) Show-MessageBox $Text $Caption $Flags },
+    [scriptblock] $PickFile = { param($Title, $FileName) Show-OpenFileBox $Title $FileName }) {
+    $queue = $null
+    if ($Scripted) {
+        $queue = [Collections.Generic.Queue[string]]::new()
+        foreach ($answer in $Answers) { $queue.Enqueue($answer) }
+    }
+    [pscustomobject]@{ Answers = $queue; Voice = $Voice; ScreenReader = $ScreenReader.IsPresent
+        Dialogs = ($Dialogs.IsPresent -and -not $Scripted); MessageBox = $MessageBox; PickFile = $PickFile }
+}
+
+# Speaks QUESTION, then returns the typed answer: from ASKER's answers, or else the console (Read-Answer). '' for Enter,
+# $null for none, which counts as no.
+function Read-AskerAnswer($Asker, [string] $Question) {
+    if ($Asker.Voice) { $Asker.Voice.Speak(($Question -replace '\s*\[[^\]]*\]$', '')) }
+    if ($null -eq $Asker.Answers) { return Read-Answer $Question }
+    Write-Host "$Question " -NoNewline
+    if ($Asker.Answers.Count -eq 0) { Write-Host '(no answer given, so no)'; return $null }
+    $answer = $Asker.Answers.Dequeue()
+    Write-Host $answer
+    $answer
+}
+
+# Speaks a question in a window when no screen reader will read it.
+function Write-WindowQuestion($Asker, [string] $Question) {
+    if ($Asker.Voice -and -not $Asker.ScreenReader) { $Asker.Voice.Speak($Question) }
+}
+
+# True for yes to QUESTION, asked through ASKER: Yes or No in a message box, the default button Yes with
+# ENTERMEANSYES; else typed (Format-YesNoQuestion), where Enter alone means no, or yes with ENTERMEANSYES. The window's
+# question is printed with its answer once it closes, so the reader isn't sent a new line while the box is open.
+function Confirm-Question($Asker, [string] $Question, [switch] $EnterMeansYes,
+    [ValidateSet('stop', 'skip it')] [string] $Ending = 'stop') {
+    if ($Asker.Dialogs) {
+        Write-WindowQuestion $Asker $Question
+        $flags = $MessageBoxFlag.YesNo -bor $MessageBoxFlag.Question -bor $MessageBoxFlag.SetForeground
+        if (-not $EnterMeansYes) { $flags = $flags -bor $MessageBoxFlag.SecondDefault }
+        try { $button = & $Asker.MessageBox $Question $QuestionCaption ([UInt32] $flags) }
+        catch { Write-Verbose "the question window did not open: $_"; $button = 0 }
+        if ($button -eq $MessageBoxResult.Yes) { Write-Host "$Question Yes"; return $true }
+        if ($button -eq $MessageBoxResult.No) { Write-Host "$Question No"; return $false }
+    }
+    $answer = Read-AskerAnswer $Asker (Format-YesNoQuestion $Question -EnterMeansYes:$EnterMeansYes -Ending $Ending)
+    if ($EnterMeansYes) { Test-YesOrEnter $answer } else { Test-Yes $answer }
+}
+
+# The file named FILENAME chosen through ASKER: in the Open dialog titled TITLE, or else typed in answer to TYPED. '' when
+# none was chosen. The caller checks what comes back.
+function Select-AskerFile($Asker, [string] $Title, [string] $FileName, [string] $Typed) {
+    if ($Asker.Dialogs) {
+        Write-WindowQuestion $Asker $Title
+        try {
+            $chosen = & $Asker.PickFile $Title $FileName
+            Write-Host "$Title $(if ($chosen) { $chosen } else { '(none chosen)' })"
+            return [string] $chosen
+        }
+        catch { Write-Verbose "the Open dialog did not open: $_" }
+    }
+    $answer = Read-AskerAnswer $Asker $Typed
+    if ($answer) { $answer.Trim().Trim('"') } else { '' }
+}
+
 # setup-wsl.ps1's exit code when this machine can't run WSL 2 yet; onboard.ps1 then gives the advice to install WSL
 # (#360). Every other failure exits 1.
 $WslUnavailableExitCode = 2
@@ -930,15 +1112,16 @@ function Test-UacEnabled {
 }
 
 # True when install.ps1 may go on in this window. An elevated window stops it, unless UAC is off, where no window is
-# anything else: then SAY explains and ASK takes a yes (#465). No answer, as without a console, counts as no.
-function Confirm-RunWindow([scriptblock] $Say, [scriptblock] $Ask) {
+# anything else: then SAY explains and ASKER (New-InstallAsker) takes a yes (#465). No answer, as without a console,
+# counts as no.
+function Confirm-RunWindow([scriptblock] $Say, $Asker) {
     if (-not (Test-Elevated)) { return $true }
     if (Test-UacEnabled) {
         & $Say 'This window runs as administrator, so the installer stopped without changing anything. Run it from a normal PowerShell window: it asks Windows for permission itself where a step needs it.'
         return $false
     }
     & $Say 'User Account Control is turned off on this computer, so every window runs as administrator, and the files the installer puts in place will be owned by the administrator account. Reloaded-II and the mod may then need administrator rights to update themselves later.'
-    if (Test-Yes (& $Ask (Format-YesNoQuestion 'Install as administrator anyway?'))) { return $true }
+    if (Confirm-Question $Asker 'Install as administrator anyway?') { return $true }
     & $Say 'The installer stopped without changing anything, because the answer was no.'
     return $false
 }
@@ -953,16 +1136,15 @@ function Test-SamePath([string] $A, [string] $B) {
 }
 
 # What install.ps1 passes every step, and what the steps find for the later ones (Launcher, Loader, ModsFolder,
-# AppsFolder, GameExe). ASK takes a question and returns the answer typed, '' for Enter, or $null for none; SAY takes a
-# printed line and a spoken one.
+# AppsFolder, GameExe). ASKER (New-InstallAsker) asks the questions; SAY takes a printed line and a spoken one.
 function New-InstallContext([string] $ReleaseFolder, [string] $PinsPath, [string] $ConfigPath, [string] $ReloadedFolder,
     [string] $SteamRoot, [string] $Desktop, [string] $DotnetRoot, [string] $VcRuntimeKey, [string] $WorkFolder,
-    [scriptblock] $Ask, [scriptblock] $Say) {
+    $Asker, [scriptblock] $Say) {
     $modConfig = Read-Json (Join-Path $ReleaseFolder 'ModConfig.json')
     [pscustomobject]@{
         ReleaseFolder = $ReleaseFolder; Pins = (Read-Json $PinsPath); ConfigPath = $ConfigPath
         ReloadedFolder = $ReloadedFolder; SteamRoot = $SteamRoot; Desktop = $Desktop; DotnetRoot = $DotnetRoot
-        VcRuntimeKey = $VcRuntimeKey; WorkFolder = $WorkFolder; Ask = $Ask; Say = $Say
+        VcRuntimeKey = $VcRuntimeKey; WorkFolder = $WorkFolder; Asker = $Asker; Say = $Say
         ModId = [string] $modConfig.ModId; ModName = [string] (Get-Property $modConfig 'ModName')
         ModVersion = [string] (Get-Property $modConfig 'ModVersion')
         Launcher = $null; Loader = $null; ModsFolder = $null; AppsFolder = $null; GameExe = $null; InstalledMod = $null
@@ -1075,7 +1257,7 @@ function Expand-PinnedArchive([string] $Archive, [string] $Destination) {
 }
 
 # Asks QUESTION, a yes/no one where Enter means no.
-function Confirm-Install($Context, [string] $Question) { Test-Yes (& $Context.Ask (Format-YesNoQuestion $Question)) }
+function Confirm-Install($Context, [string] $Question) { Confirm-Question $Context.Asker $Question }
 
 # 2. Reloaded-II: the one Reloaded-II's settings name (Find-ReloadedLauncher, without the developer scripts'
 # METAPHOR_RELOADED_EXE), or one this installer put in its folder before; else the pinned Release.zip, unpacked there
@@ -1254,7 +1436,7 @@ function Find-GameApplication($Loader) {
 }
 
 # 1. The game, first, so nothing is downloaded for a computer without it: the one added to Reloaded-II, else one found
-# in Steam (Find-MetaphorGame), confirmed or picked, else a path typed in.
+# in Steam (Find-MetaphorGame), confirmed or picked, else METAPHOR.exe chosen in the Open dialog or typed in.
 function Select-InstallGame($Context) {
     $loader = $null
     if (Test-Path -LiteralPath $Context.ConfigPath -PathType Leaf) { try { $loader = Read-Json $Context.ConfigPath } catch { $loader = $null } }
@@ -1273,23 +1455,32 @@ function Select-InstallGame($Context) {
     $path = $null
     if ($found.Count -eq 1) {
         & $Context.Say "Found the game: $($found[0])" 'Found the game in Steam.'
-        if (Test-YesOrEnter (& $Context.Ask (Format-YesNoQuestion 'Use it?' -EnterMeansYes))) { $path = $found[0] }
+        if (Confirm-Question $Context.Asker 'Use the game found in Steam?' -EnterMeansYes) { $path = $found[0] }
     }
     elseif ($found.Count -gt 1) {
         & $Context.Say 'Found the game in more than one place:' "Found the game in $($found.Count) places."
         for ($i = 0; $i -lt $found.Count; $i++) { & $Context.Say "  $($i + 1). $($found[$i])" "Number $($i + 1): $($found[$i])" }
-        $answer = & $Context.Ask "Which one? Type its number. [1-$($found.Count)]"
-        if ($answer -match '^\s*\d+\s*$' -and [int]$answer -ge 1 -and [int]$answer -le $found.Count) { $path = $found[[int]$answer - 1] }
+        if ($Context.Asker.Dialogs) {
+            # One Yes or No window per place, in turn, until a yes (#607).
+            for ($i = 0; $i -lt $found.Count -and -not $path; $i++) {
+                $question = "Use the game in place $($i + 1) of $($found.Count)? $($found[$i])"
+                if (Confirm-Question $Context.Asker $question -EnterMeansYes) { $path = $found[$i] }
+            }
+        }
+        else {
+            $answer = Read-AskerAnswer $Context.Asker "Which one? Type its number. [1-$($found.Count)]"
+            if ($answer -match '^\s*\d+\s*$' -and [int]$answer -ge 1 -and [int]$answer -le $found.Count) { $path = $found[[int]$answer - 1] }
+        }
     }
     else {
-        $answer = & $Context.Ask 'Did not find the game in Steam. Type the full path to METAPHOR.exe, or press Enter to stop:'
-        $typed = if ($answer) { $answer.Trim().Trim('"') } else { '' }
+        $typed = Select-AskerFile $Context.Asker 'Did not find the game in Steam. Choose METAPHOR.exe in the game''s install folder.' `
+            'METAPHOR.exe' 'Did not find the game in Steam. Type the full path to METAPHOR.exe, or press Enter to stop:'
         if ($typed -and (Split-Path -Leaf $typed) -eq 'METAPHOR.exe' -and (Test-Path -LiteralPath $typed -PathType Leaf)) {
             $path = [IO.Path]::GetFullPath($typed)
         }
     }
     if (-not $path) {
-        return Failed 'No game was chosen.' 'Run the installer again and choose the game, or type the full path to METAPHOR.exe in the game''s install folder.'
+        return Failed 'No game was chosen.' 'Run the installer again and choose METAPHOR.exe in the game''s install folder.'
     }
     $Context.GameExe = $path
     Done 'The game is found.' "Game: $path"
@@ -1428,9 +1619,10 @@ function Get-InstallStep($Context) {
     New-InstallStep 'Making the desktop shortcut.' ${function:Install-Shortcut} $Context -Optional
 }
 
-# The interface, by who calls it. install.ps1: the run-window check, the context and its steps (Get-InstallStep), then
-# the check. check-install.ps1: speech, then the check. onboard.ps1 and setup-wsl.ps1: the questions and the locator. Both: the yes/no wording and answer.
-Export-ModuleMember -Function Confirm-RunWindow, New-InstallContext, Get-InstallStep,
+# The interface, by who calls it. install.ps1: its questions (New-InstallAsker), the run-window check, the context and
+# its steps (Get-InstallStep), then the check. check-install.ps1: speech, then the check. onboard.ps1 and setup-wsl.ps1:
+# the questions and the locator. Both: the yes/no wording and answer.
+Export-ModuleMember -Function Test-QuestionWindow, New-InstallAsker, Confirm-Question, Confirm-RunWindow, New-InstallContext, Get-InstallStep,
     Find-ScreenReader, Select-Speech, Start-Voice, Get-InstallCheck, Get-InstallSummary, Format-Check, Format-SpokenCheck,
     Test-Interactive, Read-Answer, Format-YesNoQuestion, Test-Yes, Confirm-Step, Select-MetaphorGame, Find-MetaphorGame, Find-ReloadedLauncher `
     -Variable ShortcutName, StatusFileName, WslUnavailableExitCode

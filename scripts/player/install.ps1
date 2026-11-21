@@ -9,7 +9,7 @@ says what to do and stops the steps after it. Running it again repairs or update
 says so, and nothing it didn't put there is removed.
 
 1. Finds the game: the one added to Reloaded-II, else METAPHOR.exe in a Steam library (it asks before using it), else
-   the path you type.
+   the METAPHOR.exe you choose in Windows' Open dialog.
 2. Reloaded-II: uses the one installed, or downloads Reloaded-II 1.31.0 from its GitHub releases and unpacks it into
    your user folder (%LOCALAPPDATA%\Programs\Reloaded-II). No admin rights needed.
 3. Reloaded-II's settings: writes a settings file only when Reloaded-II has never started.
@@ -21,13 +21,15 @@ says so, and nothing it didn't put there is removed.
 9. Makes the desktop shortcut "Metaphor ReFantazio with accessibility", which starts the game through Reloaded-II.
 10. Runs the install check (check-install.ps1's checks) and says what it found.
 
-It asks before it starts, and again before each download. Every download is pinned in install-pins.json to one version
-and its SHA-256 (and Microsoft's signature for the two runtimes), and a file that doesn't match is deleted unused. It
-refuses to run as administrator. With no answer to give (no console, -NonInteractive),
-every question counts as no. With NVDA, JAWS or ZoomText running it speaks each line and question through that screen
-reader, with the speech library the mod ships (prism.dll, checked by its hash), so speech doesn't depend on the reader
-reading new lines in the window; if that can't start, it prints only. With no screen reader running it speaks with
-Windows' own voice. Runs in Windows PowerShell 5.1 and PowerShell 7.
+It asks before it starts, and again before each download, each time in a window with Yes and No buttons, which the
+screen reader reads (#607). A scripted run (-Answers) asks in the console instead, and so does a run without a console
+window. Every download is pinned in install-pins.json to one version and its SHA-256 (and Microsoft's signature for the
+two runtimes), and a file that doesn't match is deleted unused. It refuses to run as administrator. With no answer to
+give (no console, -NonInteractive), every question counts as no. With NVDA, JAWS or ZoomText running it speaks each line
+through that screen reader, with the speech library the mod ships (prism.dll, checked by its hash), so speech doesn't
+depend on the reader reading new lines in the window; if that can't start, it prints only. The reader reads the
+question windows itself. With no screen reader running it speaks lines and questions with Windows' own voice. Runs in
+Windows PowerShell 5.1 and PowerShell 7.
 
 Exit codes: 0 installed (the check may still say the game hasn't started with the mod yet); 1 a step failed, an answer
 was no, or the check found a problem.
@@ -71,36 +73,25 @@ if (-not $Pins) { $Pins = Join-Path $PSScriptRoot 'install-pins.json' }
 Import-Module (Join-Path $PSScriptRoot 'MetaphorInstall.psm1')
 
 $scripted = $PSBoundParameters.ContainsKey('Answers')
-$answerQueue = [Collections.Generic.Queue[string]]::new()
-if ($scripted) { foreach ($answer in $Answers) { $answerQueue.Enqueue($answer) } }
 
 $readers = @(Find-ScreenReader)
 $speech = Select-Speech -Speak $Speak.IsPresent -NoSpeech $NoSpeech.IsPresent -Interactive ($scripted -or (Test-Interactive)) -Readers $readers
 $voice = Start-Voice $speech
+# Each question in a Yes or No window, which the screen reader reads itself, unless the run is scripted or has no
+# console window (#607).
+$asker = New-InstallAsker -Answers $Answers -Scripted:$scripted -Voice $voice -ScreenReader:($readers.Count -gt 0) `
+    -Dialogs:(-not $scripted -and (Test-QuestionWindow))
 
 function Out-Line([string] $Printed, [string] $Spoken = $Printed) {
     Write-Host $Printed
     if ($voice) { $voice.Speak($Spoken) }
 }
 
-# Speaks QUESTION, then returns the answer: from -Answers, or else the console (MetaphorInstall.psm1). '' for Enter, $null
-# for none, which counts as no.
-function Read-InstallAnswer([string] $Question) {
-    if ($voice) { $voice.Speak(($Question -replace '\s*\[[^\]]*\]$', '')) }
-    if (-not $scripted) { return Read-Answer $Question }
-    Write-Host "$Question " -NoNewline
-    if ($answerQueue.Count -eq 0) { Write-Host '(no answer given, so no)'; return $null }
-    $answer = $answerQueue.Dequeue()
-    Write-Host $answer
-    $answer
-}
-
 $workFolder = $null
 $exitCode = 1
 try {
     $say = { param($Printed, $Spoken) if ($Spoken) { Out-Line $Printed $Spoken } else { Out-Line $Printed } }
-    $ask = { param($Question) Read-InstallAnswer $Question }
-    if (-not (Confirm-RunWindow -Say $say -Ask $ask)) { exit 1 }
+    if (-not (Confirm-RunWindow -Say $say -Asker $asker)) { exit 1 }
     if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'ModConfig.json') -PathType Leaf)) {
         Out-Line 'This installer is not in the mod''s folder. Run install.ps1 from the mod''s folder in the release zip.'
         exit 1
@@ -108,11 +99,10 @@ try {
     $workFolder = (New-Item -ItemType Directory (Join-Path ([IO.Path]::GetTempPath()) "metaphor-install-$([guid]::NewGuid())")).FullName
     $context = New-InstallContext -ReleaseFolder $PSScriptRoot -PinsPath $Pins -ConfigPath $ReloadedConfig `
         -ReloadedFolder $ReloadedFolder -SteamRoot $SteamRoot -Desktop $Desktop -DotnetRoot $DotnetRoot `
-        -VcRuntimeKey $VcRuntimeKey -WorkFolder $workFolder -Ask $ask -Say $say
+        -VcRuntimeKey $VcRuntimeKey -WorkFolder $workFolder -Asker $asker -Say $say
 
     Out-Line "Installer for $($context.ModName) $($context.ModVersion)."
-    $go = Read-InstallAnswer (Format-YesNoQuestion 'Install the mod? It puts the mod in Reloaded-II, turns it on for the game, and puts a shortcut on your desktop.')
-    if (-not (Test-Yes $go)) {
+    if (-not (Confirm-Question $asker 'Install the mod? It puts the mod in Reloaded-II, turns it on for the game, and puts a shortcut on your desktop.')) {
         Out-Line 'Nothing was changed, because the answer was no.'
         exit 1
     }

@@ -9,6 +9,9 @@ checks them in the first game session and removes the tag.
 
 ## Unreleased
 
+- **Yes and No buttons.** The installer asks each question in a small window with Yes and No buttons, which your
+  screen reader reads, instead of asking you to type an answer. Where it can't find the game, you choose
+  `METAPHOR.exe` in Windows' Open window (#607). `[NEEDS VERIFICATION by ear]`
 - **What is near, and where am I.** In the field, `N` says the people, doors, chests and enemies near you, nearest
   first, with rough steps and a direction from your facing; `LB` with the D-pad's Down and Up steps through them. `L`,
   or `LB` with Left, says the place name the game last showed (#181). `[NEEDS VERIFICATION by ear]`
