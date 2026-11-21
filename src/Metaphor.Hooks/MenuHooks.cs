@@ -57,12 +57,15 @@ internal sealed class MenuCursorHook : IGameHook, IObserves4WithResult
     private readonly CursorEvents events;
     private readonly ScreenClassLookup screenClasses;
     private readonly nint? moduleBase;
+    private readonly MessageLog? log;
+    private readonly ChangedBytes settingsCopies = new();
 
     public MenuCursorHook(HookServices services)
     {
         ArgumentNullException.ThrowIfNull(services);
         events = services.Cursors;
         screenClasses = services.ScreenClasses;
+        log = services.Log;
         using var process = Process.GetCurrentProcess();
         // Without the main module the class is logged as unreadable; the loader isn't stopped.
         moduleBase = process.MainModule?.BaseAddress;
@@ -87,5 +90,24 @@ internal sealed class MenuCursorHook : IGameHook, IObserves4WithResult
         events.Handled(new CursorInput(
             manager, classRva, commandValue, (int)result, top, row, ModuleMemoryReader.ReadInt32(manager + FlagsOffset) ?? 0,
             screenClass, ModuleMemoryReader.ReadInt32(manager + CountOffset), screenClasses.ModeOf(manager, screenClass)));
+        LogSettingsCopy(manager, screenClass);
+    }
+
+    // Debug builds only (the log is null in Release): a settings page's working copy, when it changed since the page's
+    // last input, so a session shows which bytes a value change moves (#560, #558's check 2). One bounded read through
+    // ModuleMemoryReader, which fails instead of faulting; nothing when the owner is unknown or the read fails.
+    private void LogSettingsCopy(nint manager, string? screenClass)
+    {
+        if (log is null || !SettingsPages.IsPage(screenClass) || screenClasses.Owners.OwnerOf(manager) is not { } owner)
+        {
+            return;
+        }
+        // An array, not stackalloc: a stack buffer's loads are raw-memory reads outside the reader (architecture rule 10).
+        var bytes = new byte[SettingsPages.WorkingCopyLength];
+        if (ModuleMemoryReader.ReadBytes((nint)(owner + SettingsPages.WorkingCopyOffset), bytes)
+            && settingsCopies.Changed(owner, bytes) is { } hex)
+        {
+            log.SettingsCopy(owner, hex);
+        }
     }
 }

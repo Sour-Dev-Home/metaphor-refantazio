@@ -6,7 +6,8 @@ namespace Metaphor.Features.Menus;
 
 /// <summary>Speaks the Settings category list and names its pages (#559, parent #96): on opening the list, "Settings"
 /// and the focused category, then each category's text from the game's message file and "n of 5"; on opening the System, Sound, Graphics or Display page, that page's
-/// category text and the focus's position, then on each move the position alone until the rows are read (#560). Each
+/// category text and the focused row, then on each move the row: its name when <see cref="SettingsPageRows"/> knows it,
+/// then its position (#560). Each
 /// announcement cuts off the last. The text is looked up at run time (<see cref="MessageLibrary"/>), so nothing here is
 /// game content. Safe to call from several threads.</summary>
 /// <remarks>Labels, classes and which row opens which page on build 548ddc95:
@@ -20,10 +21,10 @@ public sealed class SettingsFocus : IScreenObserver
     // The pages the list's first four rows open, in row order.
     private static readonly Screen[] Pages =
     [
-        new("System settings", "?$ConfigMenuChoicePcT@$0HG@@ope@ui@app"),
-        new("Sound settings", "?$ConfigMenuChoicePcT@$0HH@@ope@ui@app"),
-        new("Graphics settings", "?$ConfigMenuChoicePcT@$0HI@@ope@ui@app"),
-        new("Display settings", "?$ConfigMenuChoicePcT@$0HJ@@ope@ui@app"),
+        new("System settings", SettingsPages.Classes[0]),
+        new("Sound settings", SettingsPages.Classes[1]),
+        new("Graphics settings", SettingsPages.Classes[2]),
+        new("Display settings", SettingsPages.Classes[3]),
     ];
 
     // The list's rows in cursor order, and the message labels that name them; a page is named by its row's label.
@@ -40,15 +41,27 @@ public sealed class SettingsFocus : IScreenObserver
     private readonly IMessageLookup messages;
     private readonly IAnnouncer announcer;
     private readonly TextCleaner cleaner;
+    private readonly IReadOnlyList<SettingsPageRows> rows;
 
+    /// <summary>Speaks the pages' rows known on game build 548ddc95 (<see cref="SettingsPageRows.Steam18330018"/>).
+    /// </summary>
     public SettingsFocus(IMessageLookup messages, IAnnouncer announcer, TextCleaner cleaner)
+        : this(messages, announcer, cleaner, SettingsPageRows.Steam18330018)
+    {
+    }
+
+    /// <summary>Speaks the pages' rows as <paramref name="rows"/> names them; any other row by its position.</summary>
+    public SettingsFocus(
+        IMessageLookup messages, IAnnouncer announcer, TextCleaner cleaner, IReadOnlyList<SettingsPageRows> rows)
     {
         ArgumentNullException.ThrowIfNull(messages);
         ArgumentNullException.ThrowIfNull(announcer);
         ArgumentNullException.ThrowIfNull(cleaner);
+        ArgumentNullException.ThrowIfNull(rows);
         this.messages = messages;
         this.announcer = announcer;
         this.cleaner = cleaner;
+        this.rows = rows;
     }
 
     /// <summary>Speaks the focus when the list or a page is entered or its focus moves.</summary>
@@ -79,8 +92,18 @@ public sealed class SettingsFocus : IScreenObserver
             return null;
         }
         var position = change.Total is { } total ? $"{change.Index + 1} of {total}" : $"{change.Index + 1}";
-        return change.Change == ScreenChange.Entered ? Join(CategoryText(page), position) : position;
+        var row = Join(RowText(page, change.Index, change.Total), position);
+        return change.Change == ScreenChange.Entered ? Join(CategoryText(page), row) : row;
     }
+
+    // The row's name, cleaned, or null when the page's rows at this count aren't known, the row's label isn't, or its
+    // message is missing or empty. The value isn't read yet (#558's checks 2 and 3), so #96's "name, value" is the name.
+    private string? RowText(int page, int index, int? total) =>
+        total is { } count && rows.FirstOrDefault(known => known.Page == page && known.Total == count) is { } pageRows
+            && pageRows.NameLabel(index) is { } label && messages.Find(label) is { } message
+            && cleaner.Clean(message.Text) is { Length: > 0 } text
+            ? text
+            : null;
 
     private static string Join(string? name, string position) => name is null ? position : $"{name}, {position}";
 

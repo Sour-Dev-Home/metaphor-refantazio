@@ -114,6 +114,16 @@ public sealed class MessageLogTests
     }
 
     [Fact]
+    public void RecordsASettingsPagesWorkingCopyAsHex()
+    {
+        var (log, text) = NewLog();
+
+        log.SettingsCopy(choice: 0x3ca2b040, bytes: "0102ff");
+
+        Assert.Equal("1500 ms settings-copy choice=0x3ca2b040 at=+0x4c8 bytes=0102ff" + Environment.NewLine, text.ToString());
+    }
+
+    [Fact]
     public void RecordsAResolvedMessage()
     {
         var (log, text) = NewLog(now: 77);

@@ -122,6 +122,11 @@ public sealed class MessageLog(TextWriter writer, Func<long> millisecondsSinceSt
     public void Observe(CursorInput input) => Write(() => Line(
         $"{millisecondsSinceStart()} ms cursor mgr=0x{input.Manager:x} class={(input.ClassRva is { } rva ? $"0x{rva:x}" : "?")} cmd=0x{input.Command:x} result={input.Result} index={input.Index} top={input.Top} row={input.Row} flags=0x{input.Flags:x} screen={input.ScreenClass ?? "?"} count={input.Count?.ToString(CultureInfo.InvariantCulture) ?? "?"} mode={input.Mode?.ToString(CultureInfo.InvariantCulture) ?? "?"}"));
 
+    /// <summary>A settings page's working copy of its values, when it changed (#560): the page's choice and the bytes
+    /// from <see cref="Menus.SettingsPages.WorkingCopyOffset"/> on, as hex. Numbers only, no game text.</summary>
+    public void SettingsCopy(long choice, string bytes) => Write(() => Line(
+        $"{millisecondsSinceStart()} ms settings-copy choice=0x{choice:x} at=+0x{Menus.SettingsPages.WorkingCopyOffset:x} bytes={bytes}"));
+
     /// <summary>A line the game asked for by label, with its kind.</summary>
     public void Observe(LineRequested line) => Write(() =>
         Line($"{millisecondsSinceStart()} ms request via={LineRequestFunction} kind={line.Kind} text=\"{LogText.Escaped(line.Label)}\""));
