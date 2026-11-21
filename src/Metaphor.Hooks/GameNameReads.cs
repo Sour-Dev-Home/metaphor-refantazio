@@ -53,6 +53,29 @@ internal sealed class GameDataRead : IReadsGlobal
             : null;
     }
 
+    // The party (#247), in the same block: unit n at G+0x228 + n × 0x16A8 (0x3b0eb0), party slot s's unit number at
+    // G+0x1c748 + s × 4, 0 for none (0x3b0e30, which 0x3e5ac0 calls per slot before 0x3b0eb0). Static, build 548ddc95…
+    // (docs/findings/battle-party-units-static.md). The units end where the slots begin, so unit numbers run 1 to 19.
+    private const int Units = 0x228;
+    private const int UnitSize = 0x16A8;
+    private const int PartySlots = 0x1c748;
+    private const int LastUnit = (PartySlots - Units) / UnitSize - 1;
+
+    /// <summary>The party slots read: four, the party's size (docs/raw-sources/menu-screens-inventory-2026-11-17.md).
+    /// </summary>
+    public const int SlotCount = 4;
+
+    /// <summary>The unit number party slot <paramref name="slot"/> holds, or null when empty or unreadable.</summary>
+    public int? SlotUnit(int slot) =>
+        slot is >= 0 and < SlotCount && Data() is { } data &&
+        ModuleMemoryReader.ReadInt32(data + PartySlots + slot * 4) is { } unit && unit is > 0 and <= LastUnit
+            ? unit
+            : null;
+
+    /// <summary>Party unit <paramref name="unit"/>'s address, or null when unknown.</summary>
+    public nint? UnitAddress(int unit) =>
+        unit is > 0 and <= LastUnit && Data() is { } data ? data + Units + unit * UnitSize : null;
+
     private nint? Data() =>
         global != 0 && ModuleMemoryReader.ReadPointer(global) is { } data && data != 0 ? data : null;
 }

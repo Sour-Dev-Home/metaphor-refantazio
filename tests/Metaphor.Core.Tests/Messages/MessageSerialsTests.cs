@@ -123,4 +123,25 @@ public sealed class MessageSerialsTests
         Assert.Contains(new SerialRange("message/system/System_Message.msg", 1142, 790), MessageSerials.Steam18330018);
         Assert.Contains(new SerialRange("message/system/System_Message_PC.msg", 11453, 354), MessageSerials.Steam18330018);
     }
+
+    // The item and skill files (#247), as the range tests at 0x9f4a90-0x9f4ac0 hold them on build 548ddc95.
+    [Fact]
+    public void TheBuildsTableHoldsTheItemAndSkillFiles()
+    {
+        Assert.Contains(new SerialRange(MessageSerials.ItemNames, 5143, 773), MessageSerials.Steam18330018);
+        Assert.Contains(new SerialRange(MessageSerials.ItemDescriptions, 5916, 833), MessageSerials.Steam18330018);
+        Assert.Contains(new SerialRange(MessageSerials.SkillNames, 6749, 1086), MessageSerials.Steam18330018);
+        Assert.Contains(new SerialRange(MessageSerials.SkillDescriptions, 7835, 1052), MessageSerials.Steam18330018);
+    }
+
+    [Fact]
+    public void ASerialIsInAFileByItsRangeEvenBeforeTheFileIsCompiled()
+    {
+        var serials = Serials();
+
+        Assert.True(serials.InFile(500, "message/system/Test_Menu.msg"));
+        Assert.True(serials.InFile(502, "MESSAGE/system/test_menu.msg"));
+        Assert.False(serials.InFile(503, "message/system/Test_Menu.msg"));
+        Assert.False(serials.InFile(500, "message/system/Other.msg"));
+    }
 }

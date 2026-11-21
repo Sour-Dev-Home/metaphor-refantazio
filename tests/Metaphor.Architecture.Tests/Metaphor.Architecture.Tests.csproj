@@ -28,6 +28,8 @@
                       ReferenceOutputAssembly="false" OutputItemType="ScannedAssembly" />
     <ProjectReference Include="..\..\src\Metaphor.Features.Menus\Metaphor.Features.Menus.csproj"
                       ReferenceOutputAssembly="false" OutputItemType="ScannedAssembly" />
+    <ProjectReference Include="..\..\src\Metaphor.Features.Battle\Metaphor.Features.Battle.csproj"
+                      ReferenceOutputAssembly="false" OutputItemType="ScannedAssembly" />
     <ProjectReference Include="..\..\src\Metaphor.Features.Updates\Metaphor.Features.Updates.csproj"
                       ReferenceOutputAssembly="false" OutputItemType="ScannedAssembly" />
   </ItemGroup>

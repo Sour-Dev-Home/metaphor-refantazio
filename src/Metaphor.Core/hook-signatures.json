@@ -252,6 +252,13 @@
     "evidence": "Our reading of the exe in Ghidra 12.2: the controller's other open, on a second tutorial window, reads the tutorial number through its second argument (docs/findings/tutorial-popup-window-static.md); one match on disk; not yet checked in memory"
   },
   {
+    "name": "BattleHitResult",
+    "section": ".ecode",
+    "pattern": "48 8B C4 4C 89 48 20 4C 89 40 18 48 89 50 10 48 89 48 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 B8 48 81 EC 48 01 00 00 C5 F8 29 70 A8 C5 F8 29 78 98 C5 78 29 40 88 4D 8B F9 4C 8B EA",
+    "gameBuilds": ["548ddc955c176867f062c44f94c03dd9ac33caefb278a5ac388e792aedf09504"],
+    "evidence": "Our reading of the exe in Ghidra 12.2: the battle GUI's per-target hit popup, which writes the HP change and the HP left into its request (docs/findings/battle-hit-result-hp-left-static.md); one match on disk (tools/Metaphor.SignatureCheck/battle-turn-probes.json); not yet checked in memory"
+  },
+  {
     "name": "TutorialWindowUpdate",
     "section": ".ecode",
     "pattern": "41 56 48 83 EC 30 83 79 18 03 4C 8B F1 0F 84 ?? ?? ?? ?? 48 8B 01 FF 50 08 84 C0 0F 84 ?? ?? ?? ?? 41 8B 4E 18 48 89 5C 24 50",

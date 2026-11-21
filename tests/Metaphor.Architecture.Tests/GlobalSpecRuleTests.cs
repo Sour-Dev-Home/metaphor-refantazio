@@ -87,8 +87,9 @@ public sealed class GlobalSpecRuleTests
 
         // With no patterns every spec is a violation, so this counts the specs the rule found: the dialogue window and
         // the menus-open flag (#300), the game data and the character and follower tables (#81, #107), the voice
-        // language (#538), and the field's world, scene, database and person table (#181).
-        Assert.Equal(10, Rules.GlobalSpecsPointAtALoad(hooks, new Dictionary<string, string>()).Count);
+        // language (#538), the field's world, scene, database and person table (#181), and the field scene again for the
+        // battle status key (#631).
+        Assert.Equal(11, Rules.GlobalSpecsPointAtALoad(hooks, new Dictionary<string, string>()).Count);
         Assert.Empty(Rules.GlobalSpecsPointAtALoad(hooks, Scanned.SignaturePatterns()));
     }
 }

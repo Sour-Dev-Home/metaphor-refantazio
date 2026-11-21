@@ -28,6 +28,27 @@ public sealed class CursorEventsTests
     private static CursorInput Input(long manager, int command, int row, int top = 0) =>
         new(manager, ClassRva: 0x100, command, Result: 1, top, row, Flags: 0x46);
 
+    // #247: a screen counts as shown while its cursor is called, repeats included.
+    [Fact]
+    public void AScreenClassIsCalledRecentlyUntilItsCursorGoesQuiet()
+    {
+        var now = 1_000L;
+        var timed = new CursorEvents(() => now);
+        var input = Input(0xa0, Settle, row: 0) with { ScreenClass = "ListChoice@test" };
+        Assert.False(timed.CalledRecently("ListChoice@test"));
+
+        timed.Handled(input);
+        now += CursorEvents.QuietMilliseconds - 1;
+        timed.Handled(input);
+        now += CursorEvents.QuietMilliseconds - 1;
+        Assert.True(timed.CalledRecently("ListChoice@test"));
+        Assert.False(timed.CalledRecently("OtherChoice@test"));
+
+        now += 1;
+
+        Assert.False(timed.CalledRecently("ListChoice@test"));
+    }
+
     [Fact]
     public void AnInputReachesEachObserverInTheOrderAdded()
     {

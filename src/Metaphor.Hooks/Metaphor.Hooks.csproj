@@ -11,6 +11,7 @@
     <ProjectReference Include="..\Metaphor.Features.Dialogue\Metaphor.Features.Dialogue.csproj" />
     <ProjectReference Include="..\Metaphor.Features.Field\Metaphor.Features.Field.csproj" />
     <ProjectReference Include="..\Metaphor.Features.Menus\Metaphor.Features.Menus.csproj" />
+    <ProjectReference Include="..\Metaphor.Features.Battle\Metaphor.Features.Battle.csproj" />
     <ProjectReference Include="..\Metaphor.Features.Updates\Metaphor.Features.Updates.csproj" />
     <!-- Compile against it only: Reloaded-II supplies it at run time, as in the official template. -->
     <PackageReference Include="Reloaded.Mod.Interfaces" ExcludeAssets="runtime" />

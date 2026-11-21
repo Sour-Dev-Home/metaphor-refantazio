@@ -53,6 +53,7 @@ public sealed class CursorEvents
 
     private readonly Lock gate = new();
     private readonly Dictionary<long, (CursorInput Input, long CalledAt)> lastByManager = [];
+    private readonly Dictionary<string, long> lastByClass = new(StringComparer.Ordinal);
     private readonly Func<long> millisecondsNow;
     private ICursorObserver[] observers = [];
 
@@ -94,12 +95,33 @@ public sealed class CursorEvents
                 lastByManager.Clear();
             }
             lastByManager[input.Manager] = (input, now);
+            if (input.ScreenClass is { } screenClass)
+            {
+                if (!lastByClass.ContainsKey(screenClass) && lastByClass.Count >= ManagersRemembered)
+                {
+                    lastByClass.Clear();
+                }
+                lastByClass[screenClass] = now;
+            }
             if (known && last.Input == input && now - last.CalledAt < QuietMilliseconds)
             {
                 return;
             }
         }
         TellEach(Volatile.Read(ref observers), input);
+    }
+
+    /// <summary>Whether a cursor of <paramref name="screenClass"/> was called less than
+    /// <see cref="QuietMilliseconds"/> ago, repeats included: the game calls a shown screen's handler every frame, so a
+    /// screen that went quiet has closed, as far as we know (#247).</summary>
+    public bool CalledRecently(string screenClass)
+    {
+        ArgumentNullException.ThrowIfNull(screenClass);
+        var now = millisecondsNow();
+        lock (gate)
+        {
+            return lastByClass.TryGetValue(screenClass, out var calledAt) && now - calledAt < QuietMilliseconds;
+        }
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "One observer's failure must not keep the input from the others, or reach the game.")]

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Spoken battles (#247). A feature: plain logic over Metaphor.Core's announcer and battle hits, independent of
+       every other feature (architecture rule 5). -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Metaphor.Core\Metaphor.Core.csproj" />
+  </ItemGroup>
+
+</Project>

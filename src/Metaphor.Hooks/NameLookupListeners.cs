@@ -7,7 +7,7 @@ using Metaphor.Core.Messages;
 namespace Metaphor.Hooks;
 
 // Issues #74 and #106: development-only hooks on the game's message lookups, to see how a speaker's displayed name is
-// picked and whether the player's chosen name passes through. Each sees its function's result, after the original ran
+// picked and whether the player's chosen name passes through; the serial lookup's is a release hook since #247. Each sees its function's result, after the original ran
 // (IObserves4WithResult). The functions, their arguments and the names (ours, except CreateMsgFromString, which is
 // MF.Toolkit's) are in docs/raw-sources/name-lookup-candidates-2026-11-16.md. Integers are pointer-sized (rule 9);
 // only the low 32 bits of each result are meaningful where the function returns an int.
@@ -128,19 +128,23 @@ internal sealed class MessageSerialByHashListener : IGameHook, IObserves4WithRes
     }
 }
 
-/// <summary>A message fetched by serial number: the number, the flags it was asked with, whether a message came back,
-/// and the label and text the mod's serial table gives that number (#584), from files the game compiled. Called from
-/// about 250 places, so repeats within the quiet window are dropped.</summary>
-[GameHook(GameBuilds.Steam18330018, DevOnly = true)]
-internal sealed class GetMessageBySerialListener : IGameHook, IObserves4WithResult
+/// <summary>A message fetched by serial number (#247): each fetch whose serial and flags can be read goes to
+/// <see cref="HookServices.Messages"/>, for the battle lists, which say a row by the name fetched for it. In a Debug
+/// build it also logs the number, the flags, whether a message came back, and the label and text the mod's serial table
+/// gives that number (#584). Called from about 250 places, some every frame, so in Release it reads only while an
+/// observer is listening, two numbers and nothing else, and the log drops repeats within the quiet window. Release since #247; until then a Debug-only listener.</summary>
+[GameHook(GameBuilds.Steam18330018)]
+internal sealed class GetMessageBySerialHook : IGameHook, IObserves4WithResult
 {
+    private readonly MessageEvents events;
     private readonly MessageLog? log;
     private readonly MessageSerials serials;
     private readonly RepeatGate repeats = NameListening.NewGate();
 
-    public GetMessageBySerialListener(HookServices services)
+    public GetMessageBySerialHook(HookServices services)
     {
         ArgumentNullException.ThrowIfNull(services);
+        events = services.Messages;
         log = services.Log;
         serials = services.Serials;
     }
@@ -151,8 +155,18 @@ internal sealed class GetMessageBySerialListener : IGameHook, IObserves4WithResu
     /// flags and configs.</summary>
     public void Observe(nint serial, nint flags, nint configs, nint unused4, nint result)
     {
+        // Each read is a ReadProcessMemory call, so nothing is read unless an observer wants fetches now (the battle
+        // lists stop listening while another screen is current) or the Debug log is on.
+        if (log is null && !events.SerialsWanted)
+        {
+            return;
+        }
         var number = NameListening.Int32At(serial);
         var flagBits = NameListening.Int32At(flags);
+        if (number is { } read && flagBits is { } style)
+        {
+            events.Resolved(new SerialResolved(read, style));
+        }
         if (log is null || !repeats.LetThrough(number ?? long.MinValue, flagBits ?? long.MinValue))
         {
             return;

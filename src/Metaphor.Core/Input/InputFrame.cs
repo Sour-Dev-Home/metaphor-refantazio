@@ -25,6 +25,14 @@ public interface IInputControls
     IReadOnlyList<int> Keys(IReadOnlyList<int> keys);
 }
 
+/// <summary>Two input controls as one (#631): each read goes to the first, and what it hands on to the second.</summary>
+public sealed class ChainedControls(IInputControls first, IInputControls second) : IInputControls
+{
+    public int Pad(int pad, int buttons, bool made) => second.Pad(pad, first.Pad(pad, buttons, made), made);
+
+    public IReadOnlyList<int> Keys(IReadOnlyList<int> keys) => second.Keys(first.Keys(keys));
+}
+
 /// <summary>Input controls that act only while the dialogue window holds a message, so take each read of it.</summary>
 public interface IWindowInputControls : IInputControls
 {

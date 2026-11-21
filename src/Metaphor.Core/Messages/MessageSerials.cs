@@ -26,12 +26,44 @@ public sealed class MessageSerials : IMessageBySerial, IMessageFileObserver
 
     /// <summary>The files whose serials are known on game build 548ddc95… (Steam build 18330018): each first serial and
     /// count is the range test the game's message-file table holds for it, read from the exe, and matches the file as
-    /// the game compiled it in play (docs/findings/message-serials-from-file-positions.md).</summary>
+    /// the game compiled it in play (docs/findings/message-serials-from-file-positions.md). The item and skill files'
+    /// ranges are read from the same table (docs/findings/item-skill-message-serials-static.md); that the game compiles
+    /// them with those counts is <c>[NEEDS VERIFICATION]</c>, and a file that doesn't is dropped.</summary>
     public static IReadOnlyList<SerialRange> Steam18330018 { get; } =
     [
         new("message/system/System_Message.msg", 1142, 790),
         new("message/system/System_Message_PC.msg", 11453, 354),
+        new(ItemNames, 5143, 773),
+        new(ItemDescriptions, 5916, 833),
+        new(SkillNames, 6749, 1086),
+        new(SkillDescriptions, 7835, 1052),
     ];
+
+    /// <summary>The item names file: battle's item list resolves its rows' names from it (#247).</summary>
+    public const string ItemNames = "message/system/Item_Message_1.msg";
+
+    /// <summary>The item descriptions file.</summary>
+    public const string ItemDescriptions = "message/system/Item_Message_2.msg";
+
+    /// <summary>The skill names file: battle's skill list resolves its rows' names from it (#247).</summary>
+    public const string SkillNames = "message/system/Skill_Message_1.msg";
+
+    /// <summary>The skill descriptions file.</summary>
+    public const string SkillDescriptions = "message/system/Skill_Message_2.msg";
+
+    /// <summary>Whether <paramref name="serial"/> is in the range of the table's file named <paramref name="file"/>,
+    /// whether or not the file was kept.</summary>
+    public bool InFile(int serial, string file)
+    {
+        foreach (var range in ranges)
+        {
+            if (string.Equals(range.File, file, StringComparison.OrdinalIgnoreCase))
+            {
+                return serial >= range.First && serial < range.First + range.Count;
+            }
+        }
+        return false;
+    }
 
     private readonly SerialRange[] ranges;
     private readonly GameMessage[]?[] files;

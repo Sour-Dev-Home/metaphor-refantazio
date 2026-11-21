@@ -12,7 +12,7 @@ The [ground rules in `AGENTS.md`](../../AGENTS.md#ground-rules) apply to people 
 ```text
 src/                      the mod
   Metaphor.Core/            plain library: formats, logic, hook signatures, known game builds
-  Metaphor.Features.*/      one project per feature (Dialogue, Menus, Updates); never depend on each other
+  Metaphor.Features.*/      one project per feature (Dialogue, Menus, Battle, Updates); never depend on each other
   Metaphor.Hooks/           the thin hook layer: the Reloaded-II mod, the only project touching game memory
 tests/
   Metaphor.*.Tests/         xUnit tests (Unit, RoundTrip, WindowsOnly); Architecture.Tests check the architecture rules
