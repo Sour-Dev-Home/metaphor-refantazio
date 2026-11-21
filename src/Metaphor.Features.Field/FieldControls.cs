@@ -25,7 +25,8 @@ public sealed record FieldBindings(
 
 /// <summary>The field controls (#181), while the player roams the field: the nearby key speaks the list of things
 /// nearby (<see cref="Nearby"/>), the pad's next and previous chords step through it one thing at a time, and the place
-/// key and chord say where the player is (<see cref="FieldPlace"/>). The game state is read on the press, on the thread
+/// key and chord say where the player is (<see cref="FieldPlace"/>), then the current mission (<see cref="MissionLine"/>,
+/// #658: a proposal the maintainer decides on). The game state is read on the press, on the thread
 /// that handed it the read, and copied into plain values. Only the exact press is hidden from the game, and only in free
 /// roam: the key, or the chord's D-pad button (the held button stays, so the game never sees it let go and pressed
 /// again). Elsewhere everything reaches the game. A press is an up-to-down edge of a binding held on any pad or the
@@ -46,6 +47,7 @@ public sealed class FieldControls : IInputControls
     private readonly IAnnouncer announcer;
     private readonly Func<long> milliseconds;
     private readonly Action<string>? log;
+    private readonly MissionLine? mission;
     private readonly Binding nearby = new();
     private readonly Binding next = new();
     private readonly Binding previous = new();
@@ -55,10 +57,11 @@ public sealed class FieldControls : IInputControls
 
     /// <summary>Field controls on <paramref name="bindings"/> that read <paramref name="field"/>, name the place through
     /// <paramref name="place"/>, speak through <paramref name="announcer"/>, keep time by <paramref name="milliseconds"/>
-    /// and write what each press read, as numbers, to <paramref name="log"/> when there is one (Debug builds).</summary>
+    /// and write what each press read, as numbers, to <paramref name="log"/> when there is one (Debug builds). "Where am
+    /// I" ends with <paramref name="mission"/>'s current mission when there is one (#658).</summary>
     public FieldControls(
         FieldBindings bindings, IFieldReads field, FieldPlace place, IAnnouncer announcer, Func<long> milliseconds,
-        Action<string>? log = null)
+        Action<string>? log = null, MissionLine? mission = null)
     {
         ArgumentNullException.ThrowIfNull(bindings);
         ArgumentNullException.ThrowIfNull(field);
@@ -71,6 +74,7 @@ public sealed class FieldControls : IInputControls
         this.announcer = announcer;
         this.milliseconds = milliseconds;
         this.log = log;
+        this.mission = mission;
     }
 
     private enum Press
@@ -158,8 +162,11 @@ public sealed class FieldControls : IInputControls
     {
         var map = field.MapId();
         var name = place.Name(map);
-        log?.Invoke(string.Create(CultureInfo.InvariantCulture, $"place map={Number(map)} known={name is not null}"));
-        return name ?? "Place not known yet";
+        var current = mission?.Current;
+        log?.Invoke(string.Create(CultureInfo.InvariantCulture,
+            $"place map={Number(map)} known={name is not null} mission={current is not null}"));
+        var said = name ?? "Place not known yet";
+        return current is null ? said : $"{said}. {MissionLine.Spoken(current)}";
     }
 
     private string List(Press press)

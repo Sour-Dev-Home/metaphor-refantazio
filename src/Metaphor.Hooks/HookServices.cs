@@ -95,6 +95,10 @@ internal sealed record HookServices
     /// <summary>The place names "where am I" says (#181): the message lookup hook feeds it.</summary>
     public FieldPlace? FieldPlace { get; init; }
 
+    /// <summary>The current mission line (#658): spoken when it changes and added to "where am I". Only the Debug
+    /// build's text-pane probe feeds it so far. None unless the services speak.</summary>
+    public MissionLine? Mission { get; init; }
+
     /// <summary>The field reads (#181), for the map id beside each place-name lookup.</summary>
     public FieldMemory? Field { get; init; }
 
@@ -210,9 +214,12 @@ internal sealed record HookServices
         var field = new FieldMemory(fieldWorld, fieldScene, fieldDatabase, personTable, names, menusOpen, window);
         var place = new FieldPlace(cleaner);
         events.ObserveFiles(place);
+        // The mission line (#658), spoken through the reader like the other automatic field speech.
+        var mission = new MissionLine(reader, cleaner, log is null ? null : log.FieldRead);
+        events.ObserveFiles(mission);
         var fieldControls = new FieldControls(
             FieldBindings.Default, field, place, announcer, () => Environment.TickCount64,
-            log is null ? null : log.FieldRead);
+            log is null ? null : log.FieldRead, mission);
         if (report is not null)
         {
             events.ObserveFiles(report);
@@ -256,6 +263,7 @@ internal sealed record HookServices
             PersonTable = personTable,
             Field = field,
             FieldPlace = place,
+            Mission = mission,
             FieldControls = fieldControls,
             Cues = cues,
         };

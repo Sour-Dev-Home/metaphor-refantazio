@@ -177,6 +177,24 @@ public sealed class FieldControlsTests
     }
 
     [Fact]
+    public void WhereAmIAddsTheCurrentMission()
+    {
+        var mission = new MissionLine(new RecordingAnnouncer(), new TextCleaner(TextCleanerRules.None));
+        mission.Observe(new MessageFileCompiled("EN/message/system/Mission_Message_3.msg", 27,
+            "@MissionText_Test_01\n{\nReach mock harbour\n}\n"));
+        var withMission = new FieldControls(FieldBindings.Default, field, place, announcer, () => now, mission: mission);
+        place.Observe(new MessageFileCompiled("EN/message/MapName.msg", 4, "@Map_00\n{\nTestshire\n}\n"));
+
+        withMission.Keys([KeyL]);
+        withMission.Keys([]);
+        place.LookedUp(FieldPlace.MapNameEntry, 0, mapId: 3);
+        mission.Seen("Reach mock harbour");
+        withMission.Keys([KeyL]);
+
+        Assert.Equal(["Place not known yet", "Testshire. Mission: Reach mock harbour"], Said());
+    }
+
+    [Fact]
     public void AnUnknownPlaceOrUnreadableFieldSaysSo()
     {
         field.View = null;

@@ -1,5 +1,6 @@
 using System.Globalization;
 using Metaphor.Core;
+using Metaphor.Features.Field;
 
 namespace Metaphor.Hooks;
 
@@ -22,6 +23,7 @@ internal sealed class TextPaneDrawListener : IGameHook, IObserves3
     private const int ProbeBytes = 0x100;
 
     private readonly MessageLog? log;
+    private readonly MissionLine? mission;
     private readonly CallerAddress module = new();
     private readonly ChangeGate gate = new();
 
@@ -29,6 +31,7 @@ internal sealed class TextPaneDrawListener : IGameHook, IObserves3
     {
         ArgumentNullException.ThrowIfNull(services);
         log = services.Log;
+        mission = services.Mission;
     }
 
     public string SignatureName => "TextPaneDraw";
@@ -51,6 +54,9 @@ internal sealed class TextPaneDrawListener : IGameHook, IObserves3
             found = Probe((nint)drawn.Element, "elem");
         }
         log.PaneDrawn(drawn, found.At, found.Text);
+        // #658's probe: whether the HUD's mission line is a text pane. A mission's text, once per change, is spoken
+        // and logged by its label.
+        mission?.Seen(found.Text);
     }
 
     private static (string? At, string? Text) Probe(nint target, string name)
