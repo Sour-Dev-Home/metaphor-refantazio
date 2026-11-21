@@ -12,6 +12,7 @@ sound and what it means.
 |---|---|---|
 | Ally hit | Someone in your party was hit. It plays just before the damage number is read. | Two low notes going down, like "uh-oh". |
 | Enemy hit | An enemy was hit. It plays just before the damage number is read. | Two high notes going up, quicker and brighter. |
+| Guidance beep | The way to what you asked the mod to guide you to in the field ([keys](../how-to/install-the-mod.md#in-the-field-what-is-near-and-where-you-are)). | A short beep that repeats: from the side the thing is on, high ahead and low behind, about once a second far away and five times a second close. |
 
 A simple way to remember them: low and falling is bad news for you, high and rising is good news.
 

@@ -211,7 +211,7 @@ internal sealed record HookServices
         var place = new FieldPlace(cleaner);
         events.ObserveFiles(place);
         var fieldControls = new FieldControls(
-            FieldBindings.Default, field, place, announcer, () => Environment.TickCount64,
+            FieldBindings.Default, field, place, announcer, cues, () => Environment.TickCount64,
             log is null ? null : log.FieldRead);
         if (report is not null)
         {

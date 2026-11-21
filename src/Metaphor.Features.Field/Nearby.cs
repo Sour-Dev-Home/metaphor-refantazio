@@ -95,14 +95,25 @@ public static class Nearby
         _ => null,
     };
 
+    /// <summary>Where <paramref name="unit"/> lies from <paramref name="pose"/>: its ground distance, its bearing from
+    /// the facing (left positive, −π to π), and whether the game's reach test for its kind passes.</summary>
+    public static (double Distance, double Bearing, bool InReach) Measure(
+        FieldPose pose, FieldUnit unit, int? doorReachValue)
+    {
+        ArgumentNullException.ThrowIfNull(unit);
+        var dx = unit.X - pose.X;
+        var dz = unit.Z - pose.Z;
+        var distance = Math.Sqrt(dx * dx + dz * dz);
+        var bearing = Normalised(Math.Atan2(dx, dz) - pose.Heading);
+        var inReach = ReachLimit(unit.Kind, doorReachValue) is { } limit && distance < limit &&
+            Math.Abs(unit.Y - pose.Y) < HeightReach && Math.Abs(bearing) < FacingReach;
+        return (distance, bearing, inReach);
+    }
+
     private static NearbyThing Place(FieldView view, FieldUnit unit)
     {
-        var dx = unit.X - view.X;
-        var dz = unit.Z - view.Z;
-        var distance = Math.Sqrt(dx * dx + dz * dz);
-        var bearing = Normalised(Math.Atan2(dx, dz) - view.Heading);
-        var inReach = ReachLimit(unit.Kind, view.DoorReachValue) is { } limit && distance < limit &&
-            Math.Abs(unit.Y - view.Y) < HeightReach && Math.Abs(bearing) < FacingReach;
+        var (distance, bearing, inReach) =
+            Measure(new FieldPose(view.X, view.Y, view.Z, view.Heading), unit, view.DoorReachValue);
         return new(unit, distance, bearing, inReach);
     }
 

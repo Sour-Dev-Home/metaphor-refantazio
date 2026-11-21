@@ -34,6 +34,14 @@ public sealed record FieldView(
     float X, float Y, float Z, double Heading, IReadOnlyList<FieldUnit> Units, int? DoorReachValue = null,
     int? MapId = null);
 
+/// <summary>Where the player stands and faces, as <see cref="FieldView"/>'s: a value, so the beacon (#183) reads it on
+/// every poll without allocating.</summary>
+/// <param name="X">The player's position.</param>
+/// <param name="Y">The player's height.</param>
+/// <param name="Z">The player's other ground axis.</param>
+/// <param name="Heading">The way the player faces, as <see cref="FieldView.Heading"/>.</param>
+public readonly record struct FieldPose(float X, float Y, float Z, double Heading);
+
 /// <summary>What the field controls read from the game, on the thread that called them.</summary>
 public interface IFieldReads
 {
@@ -45,4 +53,7 @@ public interface IFieldReads
 
     /// <summary>The map's id, or null when it can't be read.</summary>
     int? MapId();
+
+    /// <summary>The player's position and facing alone, or null when they can't be read; allocates nothing.</summary>
+    FieldPose? ReadPose();
 }

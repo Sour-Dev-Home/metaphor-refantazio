@@ -83,6 +83,28 @@ internal static unsafe class ModuleMemoryReader
             : null;
     }
 
+    /// <summary>Reads three consecutive 32-bit floats at <paramref name="address"/>, such as a position, or null when
+    /// they can't be read. Allocates nothing.</summary>
+    public static (float X, float Y, float Z)? ReadVector3(nint address)
+    {
+        var values = stackalloc float[3];
+        return ReadProcessMemory(CurrentProcess, address, (byte*)values, 3 * sizeof(float), out var read) &&
+            read == 3 * sizeof(float)
+            ? (values[0], values[1], values[2])
+            : null;
+    }
+
+    /// <summary>Reads four consecutive 32-bit floats at <paramref name="address"/>, such as a quaternion, or null when
+    /// they can't be read. Allocates nothing.</summary>
+    public static (float X, float Y, float Z, float W)? ReadVector4(nint address)
+    {
+        var values = stackalloc float[4];
+        return ReadProcessMemory(CurrentProcess, address, (byte*)values, 4 * sizeof(float), out var read) &&
+            read == 4 * sizeof(float)
+            ? (values[0], values[1], values[2], values[3])
+            : null;
+    }
+
     /// <summary>Fills <paramref name="buffer"/> from <paramref name="address"/>; false unless every byte arrived.</summary>
     public static bool ReadBytes(nint address, Span<byte> buffer) => Copy(address, buffer);
 

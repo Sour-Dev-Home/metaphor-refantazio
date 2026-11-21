@@ -15,9 +15,12 @@ public sealed class FieldControlsTests
     private const int Up = 0x0010;
     private const int Down = 0x0040;
     private const int Left = 0x0080;
+    private const int Right = 0x0020;
+    private const int KeyG = 0x47;
     private const int A = 0x4000;
 
     private readonly RecordingAnnouncer announcer = new();
+    private readonly RecordingCues cues = new();
     private readonly StandInField field = new();
     private readonly FieldPlace place = new(new TextCleaner(TextCleanerRules.None));
     private readonly List<string> log = [];
@@ -26,7 +29,7 @@ public sealed class FieldControlsTests
 
     public FieldControlsTests()
     {
-        controls = new FieldControls(FieldBindings.Default, field, place, announcer, () => now, log.Add);
+        controls = new FieldControls(FieldBindings.Default, field, place, announcer, cues, () => now, log.Add);
         field.View = new FieldView(0, 0, 0, 0,
         [
             new(FieldKind.Door, 0, 0, 900),
@@ -54,6 +57,8 @@ public sealed class FieldControlsTests
         public FieldView? Read() => View;
 
         public int? MapId() => Map;
+
+        public FieldPose? ReadPose() => View is { } view ? new FieldPose(view.X, view.Y, view.Z, view.Heading) : null;
     }
 
     private IEnumerable<string> Said() => announcer.Said.Select(said => said.Text);
@@ -206,5 +211,82 @@ public sealed class FieldControlsTests
         Assert.Equal(4, log.Count);
         Assert.Contains("kind=Chest at=(0,0,200) distance=200 bearing=0 reach=True named=False", log[1], StringComparison.Ordinal);
         Assert.DoesNotContain(log, line => line.Contains("Testa", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GWithNothingSteppedGuidesToTheNearestAndIsHidden()
+    {
+        var handed = controls.Keys([KeyW, KeyG]);
+
+        Assert.Equal([KeyW], handed);
+        // The chest is already in reach, so the first tick arrives.
+        Assert.Equal(["Guiding to Chest", "Reached Chest"], Said());
+    }
+
+    [Fact]
+    public void LbWithRightGuidesToTheThingSteppedTo()
+    {
+        Tap(Lb | Down);
+        Tap(Lb | Down);
+        var handed = controls.Pad(0, Lb | Right, made: true);
+
+        Assert.Equal(Lb, handed);
+        Assert.Equal("Guiding to Testa", Said().Last());
+        Assert.Equal(-1, Assert.Single(cues.Held).Pan, 6);
+    }
+
+    [Fact]
+    public void AStepTooLongAgoGuidesToTheNearestInstead()
+    {
+        Tap(Lb | Down);
+        Tap(Lb | Down);
+        now += FieldControls.StepMemoryMilliseconds + 1;
+        Tap(Lb | Right);
+
+        Assert.Equal(["Guiding to Chest", "Reached Chest"], Said().TakeLast(2));
+    }
+
+    [Fact]
+    public void ASecondGuidePressCancels()
+    {
+        Tap(Lb | Down);
+        Tap(Lb | Down);
+        Tap(Lb | Right);
+        controls.Keys([KeyG]);
+
+        Assert.Equal("Guidance off", Said().Last());
+        Assert.Equal(1, cues.Silenced);
+    }
+
+    [Fact]
+    public void GuidanceTicksOnEveryReadEvenUnmade()
+    {
+        Tap(Lb | Down);
+        Tap(Lb | Down);
+        Tap(Lb | Right);
+        now += Beacon.IntervalMilliseconds(500);
+        controls.Pad(1, 0, made: false);
+
+        Assert.Equal(2, cues.Held.Count);
+    }
+
+    [Fact]
+    public void OutsideFreeRoamTheGuideKeysReachTheGameAndGuideNothing()
+    {
+        field.Roaming = false;
+
+        Assert.Equal([KeyG], controls.Keys([KeyG]));
+        Assert.Equal(Lb | Right, controls.Pad(0, Lb | Right, made: true));
+        Assert.Empty(announcer.Said);
+    }
+
+    [Fact]
+    public void GuidingWithNothingNearbySaysSo()
+    {
+        field.View = new FieldView(0, 0, 0, 0, []);
+
+        controls.Keys([KeyG]);
+
+        Assert.Equal(["Nothing nearby"], Said());
     }
 }
