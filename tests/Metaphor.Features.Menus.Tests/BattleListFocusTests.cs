@@ -18,6 +18,7 @@ public sealed class BattleListFocusTests
     private const int ItemFirst = 300;
     private const int DescriptionFlags = BattleListFocus.DescriptionFlags;
     private const int SkillDescriptionFirst = 900;
+    private const int ItemDescriptionFirst = 400;
     private const long Later = BattleListFocus.RunGapMilliseconds + 1;
 
     private readonly RecordingAnnouncer announcer = new();
@@ -25,6 +26,7 @@ public sealed class BattleListFocusTests
     private readonly CursorEvents cursors;
     private readonly MenuScreens screens = new(KnownScreens.All);
     private readonly BattleListFocus skills;
+    private readonly BattleListFocus items;
     private long now = 50_000;
 
     public BattleListFocusTests()
@@ -34,6 +36,7 @@ public sealed class BattleListFocusTests
             new SerialRange(MessageSerials.SkillNames, SkillFirst, 3),
             new SerialRange(MessageSerials.ItemNames, ItemFirst, 2),
             new SerialRange(MessageSerials.SkillDescriptions, SkillDescriptionFirst, 2),
+            new SerialRange(MessageSerials.ItemDescriptions, ItemDescriptionFirst, 2),
         ]);
         var cleaner = new TextCleaner(TextCleanerRules.None);
         messages.ObserveFiles(serials);
@@ -41,7 +44,7 @@ public sealed class BattleListFocusTests
         screens.MenusRead(open: false);
         cursors.Observe(screens);
         skills = BattleListFocus.Skills(serials, announcer, cleaner, () => now);
-        var items = BattleListFocus.Items(serials, announcer, cleaner, () => now);
+        items = BattleListFocus.Items(serials, announcer, cleaner, () => now);
         screens.Observe(skills);
         screens.Observe(items);
         screens.Observe(new UnknownScreenFocus(announcer));
@@ -53,6 +56,16 @@ public sealed class BattleListFocusTests
             Source("Item", "Tonic", "Salve")));
         messages.Compiled(new MessageFileCompiled("EN/message/system/Skill_Message_2.msg", 22,
             Source("SkillHelp", "Burns one foe", "Cuts all foes")));
+        messages.Compiled(new MessageFileCompiled("EN/message/system/Item_Message_2.msg", 23,
+            Source("ItemText", "Heals a little", "Heals more")));
+    }
+
+    private void Described(params int[] serials)
+    {
+        foreach (var serial in serials)
+        {
+            messages.Resolved(new SerialResolved(serial, DescriptionFlags));
+        }
     }
 
     private static string Source(string prefix, params string[] texts) => string.Join("\n\n",
@@ -247,19 +260,99 @@ public sealed class BattleListFocusTests
         Assert.Equal(["Skills, 1 of 3"], spoken.Said.Select(said => said.Text));
     }
 
-    // The details key (#247): the description the list fetched for its help line.
+    // The by-ear run of 2026-11-21: backing out of the skill list to battle's commands tells nothing (they are no
+    // screen), so the skill list stays current until the item list's cursor settles, after the item list fetched its
+    // names. Those names are the item list's rows all the same.
     [Fact]
-    public void TheDetailsAreTheLastDescriptionTheListFetched()
+    public void TheItemListOpenedAfterTheSkillListSaysItsFirstRow()
+    {
+        Fetched(SkillFirst);
+        Cursor(SkillClass, 0, count: 1);
+        now += 80_000;
+        Fetched(ItemFirst);
+        Described(ItemDescriptionFirst);
+        Fetched(ItemFirst + 1);
+        Described(ItemDescriptionFirst + 1);
+
+        Cursor(ItemClass, 0, count: 2, manager: 0xc0);
+
+        Assert.Equal(["Skills, Spark, 1 of 1", "Items, Tonic, 1 of 2"], Said());
+        Assert.Equal("Heals a little", items.Details(Focus(ItemClass, 0)));
+    }
+
+    // The same run's second opening: the item list closed and opened again on the same manager, its cursor settling on
+    // the same row with no other cursor between, after it fetched its names afresh.
+    [Fact]
+    public void TheListOpenedAgainOnTheSameManagerAndRowIsHeadedAgain()
+    {
+        Fetched(ItemFirst, ItemFirst + 1);
+        Cursor(ItemClass, 0, count: 2);
+        now += 16;
+        Cursor(ItemClass, 0, count: 2);
+        now += 30_000;
+        Fetched(ItemFirst, ItemFirst + 1);
+
+        Cursor(ItemClass, 0, count: 2);
+
+        Assert.Equal(["Items, Tonic, 1 of 2", "Items, Tonic, 1 of 2"], Said());
+    }
+
+    [Fact]
+    public void TheSkillListOpenedAfterTheItemListSaysItsFirstRow()
+    {
+        Fetched(ItemFirst);
+        Cursor(ItemClass, 0, count: 1);
+        now += 80_000;
+        Fetched(SkillFirst + 1);
+
+        Cursor(SkillClass, 0, count: 1, manager: 0xc0);
+
+        Assert.Equal(["Items, Tonic, 1 of 1", "Skills, Gust, 1 of 1"], Said());
+    }
+
+    // The details key (#247): the list fetches each row's description right after its name as it opens (the item
+    // list, by-ear run of 2026-11-21), so each row's details are the description fetched after its name.
+    [Fact]
+    public void TheDetailsAreTheFocusedRowsDescription()
+    {
+        Fetched(ItemFirst);
+        Described(ItemDescriptionFirst);
+        Fetched(ItemFirst + 1);
+        Described(ItemDescriptionFirst + 1);
+        Cursor(ItemClass, 0, count: 2);
+        Assert.Equal("Heals a little", items.Details(Focus(ItemClass, 0)));
+
+        Cursor(ItemClass, 1, count: 2);
+        Assert.Equal("Heals more", items.Details(Focus(ItemClass, 1)));
+
+        // The help line fetched again on a focus move, with no name before it, changes no row's.
+        Cursor(ItemClass, 0, count: 2);
+        Described(ItemDescriptionFirst + 1);
+        Assert.Equal("Heals a little", items.Details(Focus(ItemClass, 0)));
+    }
+
+    [Fact]
+    public void ARowWhoseDescriptionWasNotFetchedHasNoDetails()
     {
         Fetched(SkillFirst, SkillFirst + 1);
-        messages.Resolved(new SerialResolved(SkillDescriptionFirst, DescriptionFlags));
+        Described(SkillDescriptionFirst);
         Cursor(SkillClass, 0, count: 2);
-        Assert.Equal("Burns one foe", skills.Details(Focus(SkillClass, 0)));
 
-        Cursor(SkillClass, 1, count: 2);
-        messages.Resolved(new SerialResolved(SkillDescriptionFirst + 1, DescriptionFlags));
+        Assert.Null(skills.Details(Focus(SkillClass, 0)));
+        Assert.Equal("Burns one foe", skills.Details(Focus(SkillClass, 1)));
+    }
 
-        Assert.Equal("Cuts all foes", skills.Details(Focus(SkillClass, 1)));
+    [Fact]
+    public void TheListOpenedAgainForgetsTheLastVisitsDescriptions()
+    {
+        Fetched(SkillFirst);
+        Described(SkillDescriptionFirst);
+        Cursor(SkillClass, 0, count: 1);
+        now += 5_000;
+        Fetched(SkillFirst + 1);
+        Cursor(SkillClass, 0, count: 1, manager: 0xc0);
+
+        Assert.Null(skills.Details(Focus(SkillClass, 0)));
     }
 
     [Fact]
@@ -269,7 +362,9 @@ public sealed class BattleListFocusTests
         Cursor(SkillClass, 0, count: 1);
         Assert.Null(skills.Details(Focus(SkillClass, 0)));
 
-        messages.Resolved(new SerialResolved(SkillDescriptionFirst, DescriptionFlags));
+        Fetched(SkillFirst);
+        Described(SkillDescriptionFirst);
+        Assert.Equal("Burns one foe", skills.Details(Focus(SkillClass, 0)));
         Cursor(DifficultyClass, 0, count: 5, manager: 0xb0);
 
         Assert.Null(skills.Details(Focus(SkillClass, 0)));

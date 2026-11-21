@@ -42,9 +42,11 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
     private readonly string namesFile;
     private readonly string descriptionsFile;
     private readonly Func<long> millisecondsNow;
-    private int? description;
     private readonly Lock gate = new();
     private readonly List<int> rows = [];
+    // Each row's description by its name's serial, and the name fetched last, for the next description to pair with.
+    private readonly Dictionary<int, int> descriptions = [];
+    private int? lastName;
     private ScreenEvent? waiting;
     private long lastActivity = long.MinValue / 2;
     private bool onList;
@@ -95,17 +97,24 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
         new(ItemList, MessageSerials.ItemNames, MessageSerials.ItemDescriptions, serials, announcer, cleaner,
             millisecondsNow);
 
-    /// <summary>The focused row's description for the details key (#247): the last description the list fetched from
-    /// its descriptions file while on it, as its help line shows. Null on another screen or before any fetch. That the
-    /// help line is fetched again on each focus move is <c>[NEEDS VERIFICATION]</c> by ear; the skill's cost is not
-    /// read.</summary>
+    /// <summary>The focused row's description for the details key (#247): the description fetched from the list's
+    /// descriptions file right after the row's name. Null on another screen or for a row with none.</summary>
+    /// <remarks>On build 548ddc95 the item list, opening, fetched each row's name then its description, row by row
+    /// (name 5143, description 5916, name 5144, description 5917: the maintainer's by-ear run of 2026-11-21). That the
+    /// skill list fetches them in the same order is <c>[NEEDS VERIFICATION]</c>; its names and descriptions don't sit
+    /// at the same file positions (docs/findings/item-skill-message-serials-static.md), so positions can't pair them.
+    /// The skill's cost is not read.</remarks>
     public string? Details(ScreenEvent focus)
     {
         ArgumentNullException.ThrowIfNull(focus);
-        int? serial;
+        int? serial = null;
         lock (gate)
         {
-            serial = focus.Screen == Screen && onList ? description : null;
+            if (focus.Screen == Screen && onList && focus.Index >= 0 && focus.Index < rows.Count
+                && descriptions.TryGetValue(rows[focus.Index], out var found))
+            {
+                serial = found;
+            }
         }
         return serial is { } known ? serials.TextOf(known, cleaner) : null;
     }
@@ -120,13 +129,16 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
         {
             if (change.Screen != Screen)
             {
-                // While another screen is current (a field menu, the title), its fetches are none of this list's.
+                // While another screen is current (a field menu, the title), its fetches are none of this list's. The
+                // other battle list is the exception: backing out of it to battle's commands tells nothing, as they are
+                // no screen, so it stays current until this list's cursor settles, after this list fetched its names
+                // (by-ear run of 2026-11-21). Its own fetches are from other files, which this list ignores anyway.
                 if (change.Change == ScreenChange.Entered)
                 {
                     Forget();
-                    description = null;
                     onList = false;
-                    Volatile.Write(ref otherScreen, true);
+                    var otherList = change.Screen == SkillList || change.Screen == ItemList;
+                    Volatile.Write(ref otherScreen, !otherList);
                 }
                 else if (change.Change == ScreenChange.Left)
                 {
@@ -184,7 +196,13 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
         {
             lock (gate)
             {
-                description = resolve.Serial;
+                // A description is the row's whose name was fetched just before it; one after no name (the help line
+                // fetched again) changes nothing.
+                if (lastName is { } name)
+                {
+                    descriptions[name] = resolve.Serial;
+                    lastName = null;
+                }
             }
             return;
         }
@@ -199,14 +217,17 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
             if (rows.Count == 0 || now - lastActivity > RunGapMilliseconds)
             {
                 rows.Clear();
+                descriptions.Clear();
                 runStep = ++step;
             }
             lastActivity = now;
             if (rows.Count >= MaxRows || rows.Contains(resolve.Serial))
             {
+                lastName = rows.Contains(resolve.Serial) ? resolve.Serial : null;
                 return;
             }
             rows.Add(resolve.Serial);
+            lastName = resolve.Serial;
             if (waiting is { } focus && (said = LineFor(focus)) is not null)
             {
                 waiting = null;
@@ -223,6 +244,8 @@ public sealed class BattleListFocus : IScreenObserver, ISerialResolveObserver, I
     private void Forget()
     {
         rows.Clear();
+        descriptions.Clear();
+        lastName = null;
         waiting = null;
     }
 

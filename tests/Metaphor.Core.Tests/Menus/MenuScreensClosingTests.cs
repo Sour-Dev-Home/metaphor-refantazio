@@ -133,6 +133,54 @@ public sealed class MenuScreensClosingTests
         Assert.Equal([$"Entered {DialogClass} 1", $"Left {DialogClass} 1", $"Entered {DialogClass} 1"], seen);
     }
 
+    // The by-ear run of 2026-11-21: battle's item list closed and opened again kept its manager and settled on the same
+    // row, with no other cursor between. The handler is called every frame while shown, so only a manager that went
+    // quiet is told the same input again (CursorEvents, #557): that is the screen shown again.
+    [Fact]
+    public void AScreenShownOutsideTheMenusShownAgainOnTheSameManagerIsEnteredAfresh()
+    {
+        var cursors = Timed(out var clock);
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0));
+        clock.Now += 16;
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0));
+        clock.Now += CursorEvents.QuietMilliseconds + 1;
+
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0));
+
+        Assert.Equal([$"Entered {DialogClass} 0", $"Entered {DialogClass} 0"], seen);
+    }
+
+    // A move that leaves the cursor where it was (up on the top row) settles on the same input: no change.
+    [Fact]
+    public void AScreenShownOutsideTheMenusStaysSilentWhenAMoveKeepsItsRow()
+    {
+        var cursors = Timed(out var clock);
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0));
+        clock.Now += 16;
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0) with { Command = 0x14 });
+        clock.Now += 16;
+
+        cursors.Handled(Input(DialogClass, manager: 0xa0, row: 0));
+
+        Assert.Equal([$"Entered {DialogClass} 0"], seen);
+    }
+
+    private CursorEvents Timed(out Clock clock)
+    {
+        var outside = new MenuScreens([new Screen("Dialog", DialogClass, OutsideMenus: true)]);
+        outside.Observe(new Recording(seen));
+        var time = new Clock();
+        var cursors = new CursorEvents(() => time.Now);
+        cursors.Observe(outside);
+        clock = time;
+        return cursors;
+    }
+
+    private sealed class Clock
+    {
+        public long Now { get; set; } = 10_000;
+    }
+
     [Fact]
     public void AMenuScreenKeepsItsFocusAcrossManagers()
     {
