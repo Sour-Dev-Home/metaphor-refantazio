@@ -12,18 +12,21 @@
 #                                           tests/pester/, the stand-in game and the workflows
 #     docs                       <reason>   the docs stage
 #     check-tests                <reason>   tests/check/test-check.sh (run-check-suites.sh --select)
-#   what-runs.sh --job code|scripts [BASE HEAD]
+#     varied-setup               <reason>   CI's pester-varied-setup job (#655): the player and setup scripts, the
+#                                           Pester tests, their runner, the Pester install and ci.yml
+#   what-runs.sh --job code|scripts|varied-setup [BASE HEAD]
 #                                           CI: prints "run=true" or "run=false" (and appends it to $GITHUB_OUTPUT when
-#                                           set) from the `code` or `pester` line for the diff BASE...HEAD
+#                                           set) from the `code`, `pester` or `varied-setup` line for the diff BASE...HEAD
 #
 # A test project is selected when the changed file sits in it, or in a project it references, directly or through
 # other projects (the ProjectReference graph in the .csproj files). Build-wide files (Directory.*, global.json, the
 # solution) select every test project. The selection is what the change needs and nothing more: running everything
 # (CI, `check.sh full`, METAPHOR_FULL_TESTS=1) is the caller's choice. Run from the repository root.
 #
-# --job: only pull requests skip anything. Any other event (EVENT_NAME: the merge queue, a push to main) runs
-# everything, as does a diff that can't be read or is empty. A job that gets "false" skips its steps and still finishes
-# green, so its required check always reports.
+# --job: only pull requests skip anything, except that varied-setup also skips in the merge queue and on a push. Any
+# other event (EVENT_NAME: the merge queue and a push to main; for varied-setup the nightly schedule and a run by hand)
+# runs everything, as does a diff that can't be read or is empty. A job that gets "false" skips its steps and still
+# finishes green, so its required check always reports.
 set -uo pipefail
 
 # job JOB BASE HEAD: the --job mode.
@@ -32,14 +35,19 @@ job() {
   case "${1:-}" in
     code) kind=code ;;
     scripts) kind=pester ;;
-    *) echo "usage: what-runs.sh --job code|scripts [BASE HEAD]" >&2; exit 2 ;;
+    varied-setup) kind=varied-setup ;;
+    *) echo "usage: what-runs.sh --job code|scripts|varied-setup [BASE HEAD]" >&2; exit 2 ;;
   esac
   emit() {
     echo "run=$1"
     [ -z "${GITHUB_OUTPUT:-}" ] || echo "run=$1" >> "$GITHUB_OUTPUT"
     exit 0
   }
-  [ "${EVENT_NAME:-}" = pull_request ] || emit true
+  # The varied setup also skips in the merge queue and on main; the nightly run and a run by hand take everything.
+  case "$kind ${EVENT_NAME:-}" in
+    *" pull_request" | "varied-setup merge_group" | "varied-setup push") ;;
+    *) emit true ;;
+  esac
   [ -n "${2:-}" ] && [ -n "${3:-}" ] || emit true
   files="$(git diff --name-only "$2...$3")" || emit true
   [ -n "$files" ] || emit true
@@ -105,7 +113,7 @@ select_runs() {
     for q in ${rdeps[$p]:-}; do need_build "$q" "$f" "$(basename "$p" .csproj)"; done
   }
 
-  local code="" compile="" pester="" docs="" check="" every="" owner="" best f untested=()
+  local code="" compile="" pester="" docs="" check="" varied="" every="" owner="" best f untested=()
   for f in "${files[@]}"; do
     case "$f" in
       Directory.Build.* | Directory.Packages.props | global.json | Metaphor.sln | .editorconfig) every="$f" ;;
@@ -120,6 +128,12 @@ select_runs() {
     # The check scripts, what they read and their tests: test-check.sh's own ground.
     case "$f" in
       scripts/* | tests/check/* | tests/bash/* | .github/* | tools/docs/* | .claude/*) check="${check:-$f}" ;;
+    esac
+    # What a player's or contributor's culture and paths can break: the installer and the setup scripts, with the
+    # job's own tests and how it runs them.
+    case "$f" in
+      scripts/player/* | scripts/setup/* | tests/pester/* | scripts/check/run-pester.sh | scripts/ci/install-pester.sh | \
+        .github/workflows/ci.yml) varied="${varied:-$f}" ;;
     esac
     best="" owner=""
     for p in "${projects[@]}"; do
@@ -143,6 +157,7 @@ select_runs() {
   [ -z "$pester" ] || echo "pester $pester changed"
   [ -z "$docs" ] || echo "docs $docs changed"
   [ -z "$check" ] || echo "check-tests $check changed"
+  [ -z "$varied" ] || echo "varied-setup $varied changed"
   return 0
 }
 

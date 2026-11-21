@@ -187,6 +187,28 @@ job "the merge queue skips nothing (code)" true code merge_group docs/a.md
 job "the merge queue skips nothing (scripts)" true scripts merge_group docs/a.md
 job "a push to main skips nothing" true scripts push docs/a.md
 GITHUB_ACTIONS=true job "CI's environment doesn't stop a PR skipping" false scripts pull_request docs/a.md
+# pester-varied-setup (#655): only for the player and setup scripts, the Pester tests and their runners, in the merge
+# queue and on main as on a PR; the nightly run and a run by hand take everything.
+job "varied setup: a docs-only change skips it" false varied-setup merge_group docs/a.md
+job "varied setup: a game-feature change skips it" false varied-setup merge_group src/Metaphor.Features.Menus/a.cs
+job "varied setup: a dev script change skips it" false varied-setup merge_group scripts/dev/session.ps1
+job "varied setup: an installer change runs it" true varied-setup merge_group scripts/player/install.ps1
+job "varied setup: a setup script change runs it" true varied-setup merge_group scripts/setup/onboard.ps1
+job "varied setup: a Pester test change runs it" true varied-setup merge_group tests/pester/install.Tests.ps1
+job "varied setup: its runner changing runs it" true varied-setup merge_group scripts/check/run-pester.sh
+job "varied setup: its Pester install changing runs it" true varied-setup merge_group scripts/ci/install-pester.sh
+job "varied setup: a ci.yml change runs it" true varied-setup merge_group .github/workflows/ci.yml
+job "varied setup: a PR's installer change runs it" true varied-setup pull_request scripts/player/check-install.ps1
+job "varied setup: a push to main's docs change skips it" false varied-setup push docs/a.md
+job "varied setup: a push to main's installer change runs it" true varied-setup push scripts/player/install.cmd
+job "varied setup: the nightly run takes everything" true varied-setup schedule docs/a.md
+job "varied setup: a run by hand takes everything" true varied-setup workflow_dispatch docs/a.md
+out="$(cd "$jobs_repo" && EVENT_NAME=merge_group GITHUB_OUTPUT='' bash "$ROOT/scripts/ci/what-runs.sh" --job varied-setup '' '')"
+check "varied setup: a merge-queue run with no diff runs it" [ "$out" = run=true ]
+out="$(sel scripts/player/install.ps1)"
+check "an installer change selects the varied setup" has "varied-setup scripts/player/install.ps1 changed"
+out="$(sel scripts/dev/session.ps1)"
+check "a dev script change doesn't select the varied setup" lacks "varied-setup"
 out="$(cd "$jobs_repo" && GITHUB_OUTPUT="$jobs_repo/out" EVENT_NAME=pull_request \
   bash "$ROOT/scripts/ci/what-runs.sh" --job code "$base" "$base"; cat "$jobs_repo/out")"
 check "an empty diff runs, and the answer reaches GITHUB_OUTPUT" [ "$out" = $'run=true\nrun=true' ]

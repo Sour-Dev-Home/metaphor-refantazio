@@ -6,12 +6,17 @@ on:
   pull_request:
   # The merge queue tests each PR merged with the ones ahead of it; its required checks come from this run.
   merge_group:
+  # Nightly on main: pester-varied-setup only (#655), whatever changed; every other job skips.
+  schedule:
+    # 03:41 UTC. Off the hour: GitHub delays, and may drop, scheduled runs at the start of each hour.
+    - cron: "41 3 * * *"
 
 permissions:
   contents: read
 
 jobs:
   repo-rules:
+    if: github.event_name != 'schedule' # the nightly run is pester-varied-setup's alone
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # PII_PATTERNS lives in the main-push environment, which only main may use (#309), so no branch's run can read it.
@@ -97,6 +102,7 @@ jobs:
   # docs changed. In the merge queue and on main: the full Windows gate, where the release package is built and rebuilt;
   # players' builds stay Windows-built until the same bytes from both systems are shown.
   build:
+    if: github.event_name != 'schedule'
     runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-latest' || 'windows-latest' }}
     timeout-minutes: 15
     defaults:
@@ -185,6 +191,7 @@ jobs:
   # per test file (#314: the files ran one after another in a single job, over 5 of its 6 minutes); each job builds the
   # stand-in game on its own runner, so the files can't collide on its obj folder.
   pester:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     timeout-minutes: 15
     strategy:
@@ -228,8 +235,10 @@ jobs:
   # Every Pester file once more, on a setup unlike the runner's default (#459): a German culture, a checkout whose path
   # holds a space, é and Japanese, and a temporary folder whose path holds a space and é, as a player's or
   # contributor's may. The tests that start Windows PowerShell 5.1 run it under the same culture and folders. Merge
-  # queue and main only, beside the Windows build (ADR 0008), so pull requests stay fast. One job, not a second matrix:
-  # run-pester.sh runs the files in parallel on the runner's cores, as `check.sh full` does locally.
+  # queue and main only, beside the Windows build (ADR 0008), so pull requests stay fast, and there only when the
+  # installer, the setup scripts, the Pester tests or their runners change (scripts/ci/what-runs.sh --job varied-setup,
+  # #655); nightly on main it runs whatever changed. When it runs, the required `scripts` check needs it to pass. One
+  # job, not a second matrix: run-pester.sh runs the files in parallel on the runner's cores, as `check.sh full` does.
   pester-varied-setup:
     if: github.event_name != 'pull_request'
     runs-on: windows-latest
@@ -245,10 +254,22 @@ jobs:
         with:
           persist-credentials: false
           path: Bibliothèque Steam/日本 repo
+          fetch-depth: 0 # the change check diffs the queue's merge (or the push) against its base
+      # A step-level skip: the job still finishes green, and `scripts` reads that as passed. The diff that can't be read
+      # runs everything, so a skip only ever means nothing it tests changed.
+      - name: Check what changed
+        id: changes
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE: ${{ github.event.merge_group.base_sha || github.event.before }}
+          HEAD: ${{ github.event.merge_group.head_sha || github.event.after }}
+        run: bash scripts/ci/what-runs.sh --job varied-setup "$BASE" "$HEAD"
       - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        if: steps.changes.outputs.run == 'true'
         with:
           global-json-file: Bibliothèque Steam/日本 repo/global.json
       - name: Install the pinned Pester
+        if: steps.changes.outputs.run == 'true'
         run: bash scripts/ci/install-pester.sh
       # The user's culture, which every process started after this reads: pwsh, Windows PowerShell 5.1 (the player
       # scripts' tests start it) and .NET. Set-Culture alone, in its own process: with Set-WinUILanguageOverride after it
@@ -256,6 +277,7 @@ jobs:
       # Set-Culture alone, run 44652941749, gave de-DE). The UI language needs a language pack the image lacks, so
       # error messages stay English.
       - name: Switch the user's culture
+        if: steps.changes.outputs.run == 'true'
         run: |
           pwsh -NoProfile -Command 'Set-Culture $env:CULTURE -ErrorAction Stop'
           for shell in pwsh powershell; do
@@ -267,15 +289,17 @@ jobs:
       # files through the console's code page, which can't hold it. check-install.Tests.ps1 and ghidra.Tests.ps1 test
       # the scripts with such paths directly.
       - name: Run every Pester file
+        if: steps.changes.outputs.run == 'true'
         run: |
           temp="$RUNNER_TEMP/Temp é"
           mkdir -p "$temp"
           export TMPDIR="$temp" TEMP="$(cygpath -w "$temp")" TMP="$(cygpath -w "$temp")"
           bash scripts/check/run-pester.sh
 
-  # The required check named `scripts` (the ruleset asks for it by name): it passes when every Pester job passed or was
-  # skipped, and fails when any failed or was cancelled. Add a test file under tests/pester and to the matrix above;
-  # tests/bash/test-ci-matrix.sh fails when the two disagree.
+  # The required check named `scripts` (the ruleset asks for it by name): it passes when every Pester job passed, or was
+  # skipped on the one event its `if` skips it on, and fails otherwise: failed, cancelled, or skipped where it should
+  # have run (#655). GitHub counts a skipped job's check as passed, so the result is read here, not trusted. Add a test
+  # file under tests/pester and to the matrix above; tests/bash/test-ci-matrix.sh fails when the two disagree.
   scripts:
     needs: [pester, pester-varied-setup]
     if: always()
@@ -284,18 +308,19 @@ jobs:
     steps:
       - name: Every Pester job passed
         env:
+          EVENT_NAME: ${{ github.event_name }}
           RESULT: ${{ needs.pester.result }}
           VARIED: ${{ needs.pester-varied-setup.result }}
         run: |
-          echo "pester jobs: $RESULT; varied setup: $VARIED"
-          for result in "$RESULT" "$VARIED"; do
-            [ "$result" = success ] || [ "$result" = skipped ] || exit 1
-          done
+          echo "pester jobs: $RESULT; varied setup: $VARIED ($EVENT_NAME)"
+          [ "$RESULT" = success ] || { [ "$RESULT" = skipped ] && [ "$EVENT_NAME" = schedule ]; } || exit 1
+          [ "$VARIED" = success ] || { [ "$VARIED" = skipped ] && [ "$EVENT_NAME" = pull_request ]; } || exit 1
 
   # Runs beside build, so it gates merges without slowing the commit stage. A vulnerable package fails the job; a new
   # high or critical CodeQL security alert blocks the merge through the ruleset's code-scanning rule. It runs on every
   # pull request: code scanning must report on each one.
   security:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
