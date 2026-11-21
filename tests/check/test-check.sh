@@ -2474,7 +2474,7 @@ test_rules_process_starts_do_not_grow_with_the_file_count() {
 # scripts/check/check-status.sh reads. Their output is shown whole, in test order, after all have finished.
 # METAPHOR_TEST_JOBS=1 runs one at a time and must give the same pass and fail counts. An optional argument runs only
 # the tests whose names match it (an extended regular expression).
-JOBS="$(pool_default_jobs)"
+JOBS="$(suite_jobs)" # the outside's slots, from before suite-env.sh made them the suite's own (#655)
 RESULTS="$WORK/results"
 
 # run_test NAME: the pool's job (scripts/check/pool.sh), in its own subshell: run one test with its own folder and
