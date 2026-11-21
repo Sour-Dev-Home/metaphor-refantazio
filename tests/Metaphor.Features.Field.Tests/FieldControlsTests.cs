@@ -65,6 +65,17 @@ public sealed class FieldControlsTests
     }
 
     [Fact]
+    public void EachKeyboardReadChecksReachWithNoKeyHeld()
+    {
+        var reach = new ReachCallouts(field, announcer, () => now);
+        var withReach = new FieldControls(FieldBindings.Default, field, place, announcer, () => now, reach: reach);
+
+        withReach.Keys([]);
+
+        Assert.Equal(new Announcement("Chest, in reach", Interrupt: false), announcer.Said.Single());
+    }
+
+    [Fact]
     public void NSpeaksTheWholeListAndIsHidden()
     {
         var handed = controls.Keys([KeyW, KeyN]);

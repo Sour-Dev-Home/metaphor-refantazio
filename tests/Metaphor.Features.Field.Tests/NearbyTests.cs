@@ -28,6 +28,17 @@ public sealed class NearbyTests
     }
 
     [Fact]
+    public void InReachKeepsAChestBehindEightNearerPeople()
+    {
+        var units = Enumerable.Range(1, 8).Select(i => At(FieldKind.Person, 0, i * 10))
+            .Append(At(FieldKind.Chest, 0, 250)).ToArray();
+
+        var inReach = Nearby.InReach(Facing(0, units));
+
+        Assert.Equal(FieldKind.Chest, Assert.Single(inReach).Unit.Kind);
+    }
+
+    [Fact]
     public void AtMostEightThingsAreListed()
     {
         var units = Enumerable.Range(1, 12).Select(i => At(FieldKind.Person, 0, i * Step)).ToArray();

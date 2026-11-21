@@ -53,6 +53,17 @@ public static class Nearby
             .Take(MaxThings)];
     }
 
+    /// <summary>The things of <paramref name="view"/> the game's reach test passes for, nearest first, however many and
+    /// whatever else is nearer (#644).</summary>
+    public static IReadOnlyList<NearbyThing> InReach(FieldView view)
+    {
+        ArgumentNullException.ThrowIfNull(view);
+        return [.. view.Units
+            .Select(unit => Place(view, unit))
+            .Where(thing => thing.InReach)
+            .OrderBy(thing => thing.Distance)];
+    }
+
     /// <summary>Spoken steps for a distance, at least one.</summary>
     public static int Steps(double distance) => Math.Max(1, (int)Math.Round(distance / UnitsPerStep));
 

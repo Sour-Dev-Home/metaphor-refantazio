@@ -46,6 +46,7 @@ public sealed class FieldControls : IInputControls
     private readonly IAnnouncer announcer;
     private readonly Func<long> milliseconds;
     private readonly Action<string>? log;
+    private readonly ReachCallouts? reach;
     private readonly Binding nearby = new();
     private readonly Binding next = new();
     private readonly Binding previous = new();
@@ -55,10 +56,11 @@ public sealed class FieldControls : IInputControls
 
     /// <summary>Field controls on <paramref name="bindings"/> that read <paramref name="field"/>, name the place through
     /// <paramref name="place"/>, speak through <paramref name="announcer"/>, keep time by <paramref name="milliseconds"/>
-    /// and write what each press read, as numbers, to <paramref name="log"/> when there is one (Debug builds).</summary>
+    /// and write what each press read, as numbers, to <paramref name="log"/> when there is one (Debug builds). Each
+    /// keyboard read, held keys or not, also runs <paramref name="reach"/>'s check when there is one (#644).</summary>
     public FieldControls(
         FieldBindings bindings, IFieldReads field, FieldPlace place, IAnnouncer announcer, Func<long> milliseconds,
-        Action<string>? log = null)
+        Action<string>? log = null, ReachCallouts? reach = null)
     {
         ArgumentNullException.ThrowIfNull(bindings);
         ArgumentNullException.ThrowIfNull(field);
@@ -71,6 +73,7 @@ public sealed class FieldControls : IInputControls
         this.announcer = announcer;
         this.milliseconds = milliseconds;
         this.log = log;
+        this.reach = reach;
     }
 
     private enum Press
@@ -113,10 +116,11 @@ public sealed class FieldControls : IInputControls
     }
 
     /// <summary>Takes one read of the keys held down, acts on a press, and returns the keys to hand on: without the
-    /// field's keys while held in free roam.</summary>
+    /// field's keys while held in free roam. It also runs the reach check, if any (#644).</summary>
     public IReadOnlyList<int> Keys(IReadOnlyList<int> keys)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        reach?.Check();
         var listHeld = keys.Contains(bindings.NearbyKey);
         var placeHeld = keys.Contains(bindings.PlaceKey);
         var roaming = (listHeld || placeHeld) && field.InFreeRoam();

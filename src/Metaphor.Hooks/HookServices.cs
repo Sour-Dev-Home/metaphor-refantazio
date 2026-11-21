@@ -212,7 +212,7 @@ internal sealed record HookServices
         events.ObserveFiles(place);
         var fieldControls = new FieldControls(
             FieldBindings.Default, field, place, announcer, () => Environment.TickCount64,
-            log is null ? null : log.FieldRead);
+            log is null ? null : log.FieldRead, new ReachCallouts(field, announcer, () => Environment.TickCount64));
         if (report is not null)
         {
             events.ObserveFiles(report);
